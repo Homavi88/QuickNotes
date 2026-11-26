@@ -4,6 +4,19 @@
 > Стек: Tauri 2 + React + TypeScript + Tailwind CSS
 > Платформа: Windows 10/11
 
+## Download for Windows
+
+Ready-to-run installers (no Node or Rust required):
+
+- **[Latest release](https://github.com/Homavi88/QuickNotes/releases/latest)** — download the `.msi` or NSIS `.exe` from Assets
+- Direct latest links (update after each release if filenames change):
+  - [QuickNotes_0.1.0_x64_en-US.msi](https://github.com/Homavi88/QuickNotes/releases/latest/download/QuickNotes_0.1.0_x64_en-US.msi)
+  - [QuickNotes_0.1.0_x64-setup.exe](https://github.com/Homavi88/QuickNotes/releases/latest/download/QuickNotes_0.1.0_x64-setup.exe)
+
+These are **unsigned** MVP builds. Windows SmartScreen may warn; choose **More info → Run anyway** if prompted. Code signing can be added later via CI secrets.
+
+CI also uploads the same installers as workflow artifacts on `main` / PRs (see the **Windows CI** workflow).
+
 ---
 
 ## 1. Роль

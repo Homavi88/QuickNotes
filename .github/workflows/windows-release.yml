@@ -1,0 +1,72 @@
+# Publish Windows installers to a GitHub Release via tauri-action.
+# Triggers: version tags (v*) or manual workflow_dispatch.
+# Unsigned MVP builds — Windows SmartScreen may warn end users.
+name: Windows Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v0.1.0). Leave empty to use package.json version.'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  publish-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Resolve release tag
+        id: tag
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.tag }}" ]; then
+            echo "name=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "push" ] && [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "name=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          else
+            VERSION=$(node -p "require('./package.json').version")
+            echo "name=v${VERSION}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and publish Windows release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ steps.tag.outputs.name }}
+          releaseName: QuickNotes ${{ steps.tag.outputs.name }}
+          releaseBody: |
+            Ready-to-run Windows installers for QuickNotes (no Node/Rust required).
+
+            **Artifacts:** `.msi` and NSIS `.exe` (unsigned MVP — Windows SmartScreen may show a warning; choose More info → Run anyway if prompted).
+
+            Built from commit `${{ github.sha }}`.
+          releaseDraft: false
+          prerelease: false
+          args: --bundles msi,nsis
