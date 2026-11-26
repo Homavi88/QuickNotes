@@ -1,21 +1,26 @@
-//! Early startup helpers: file logging, WebView2 detection, native error dialogs.
+//! Early startup helpers: file logging, WebView2 Fixed Runtime, native error dialogs.
 //!
 //! Portable / corporate machines often have no console (`windows_subsystem = "windows"`),
 //! so silent exits are useless. Always write `<exe>/data/quicknotes.log` (portable) or
 //! beside the exe / AppData, and show a MessageBox for fatal runtime gaps.
+//!
+//! Portable packages ship a Fixed Version WebView2 Runtime under `<exe>/WebView2/`.
+//! We point WebView2 at it via `WEBVIEW2_BROWSER_EXECUTABLE_FOLDER` — no MSI / setup exe.
 
 use crate::models::{config_dir, exe_dir, is_portable_mode};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
+#[cfg(windows)]
+use std::path::Path;
 use std::sync::Mutex;
 
 static LOG_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
 
-const WEBVIEW2_DOWNLOAD: &str =
-    "https://developer.microsoft.com/microsoft-edge/webview2/";
-const WEBVIEW2_BOOTSTRAPPER_NAME: &str = "MicrosoftEdgeWebview2Setup.exe";
+const WEBVIEW2_DOWNLOAD: &str = "https://developer.microsoft.com/microsoft-edge/webview2/";
 const WEBVIEW2_CLIENT_GUID: &str = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
+/// Stable folder name written by `scripts/package-portable.ps1`.
+const FIXED_RUNTIME_DIR: &str = "WebView2";
 
 /// Resolve and create the log file path. Prefer portable `data/`, then AppData, then exe dir.
 pub fn init_logging() -> PathBuf {
@@ -93,8 +98,88 @@ pub fn show_error(title: &str, message: &str) {
     }
 }
 
-/// Returns true when Evergreen WebView2 Runtime appears installed (HKLM/HKCU).
+/// Locate a bundled Fixed Version runtime folder next to the exe.
+///
+/// Looks for:
+/// - `<exe>/WebView2/msedgewebview2.exe` (portable packaging)
+/// - `<exe>/Microsoft.WebView2.FixedVersionRuntime.*/msedgewebview2.exe`
+pub fn find_fixed_runtime_dir() -> Option<PathBuf> {
+    let dir = exe_dir()?;
+
+    let stable = dir.join(FIXED_RUNTIME_DIR);
+    if stable.join("msedgewebview2.exe").is_file() {
+        return Some(stable);
+    }
+
+    if let Ok(rd) = fs::read_dir(&dir) {
+        for entry in rd.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with("Microsoft.WebView2.FixedVersionRuntime") {
+                let candidate = entry.path();
+                if candidate.join("msedgewebview2.exe").is_file() {
+                    return Some(candidate);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Point WebView2 at the bundled Fixed Runtime (and portable user-data folder) **before**
+/// Tauri/wry creates any webview. Must run early in `run()`.
+///
+/// Returns `true` when a Fixed Runtime folder was found and env vars were set.
+pub fn prepare_fixed_webview2() -> bool {
+    let Some(runtime) = find_fixed_runtime_dir() else {
+        log_line("Fixed WebView2 Runtime: not bundled next to exe");
+        return false;
+    };
+
+    let runtime_str = runtime.to_string_lossy().into_owned();
+    log_line(&format!(
+        "Fixed WebView2 Runtime: {}",
+        runtime.display()
+    ));
+
+    // Required so CreateCoreWebView2Environment uses the local binaries (no system install).
+    std::env::set_var("WEBVIEW2_BROWSER_EXECUTABLE_FOLDER", &runtime_str);
+
+    // Keep WebView2 profile/cache under the portable data/ tree when possible.
+    if is_portable_mode() {
+        let user_data = config_dir().join("webview2");
+        if let Err(e) = fs::create_dir_all(&user_data) {
+            log_line(&format!("webview2 user-data dir create failed: {e}"));
+        } else {
+            std::env::set_var(
+                "WEBVIEW2_USER_DATA_FOLDER",
+                user_data.to_string_lossy().as_ref(),
+            );
+            log_line(&format!(
+                "WEBVIEW2_USER_DATA_FOLDER={}",
+                user_data.display()
+            ));
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        ensure_fixed_runtime_acls(&runtime);
+    }
+
+    log_line(&format!(
+        "WEBVIEW2_BROWSER_EXECUTABLE_FOLDER={}",
+        runtime_str
+    ));
+    true
+}
+
+/// Returns true when Fixed Runtime is bundled **or** Evergreen Runtime appears installed.
 pub fn webview2_runtime_available() -> bool {
+    if find_fixed_runtime_dir().is_some() {
+        return true;
+    }
     #[cfg(windows)]
     {
         webview2_runtime_available_windows()
@@ -105,75 +190,91 @@ pub fn webview2_runtime_available() -> bool {
     }
 }
 
-/// If a bundled bootstrapper sits next to the exe, launch it (interactive).
-/// Returns true if the process was started successfully.
-pub fn try_launch_webview2_bootstrapper() -> bool {
-    let Some(dir) = exe_dir() else {
-        return false;
-    };
-    let setup = dir.join(WEBVIEW2_BOOTSTRAPPER_NAME);
-    if !setup.is_file() {
-        log_line(&format!(
-            "WebView2 bootstrapper not found at {}",
-            setup.display()
-        ));
-        return false;
-    }
-    log_line(&format!("Launching WebView2 bootstrapper: {}", setup.display()));
-    match std::process::Command::new(&setup).spawn() {
-        Ok(_) => {
-            log_line("WebView2 bootstrapper started; user should finish install and relaunch");
-            true
-        }
-        Err(e) => {
-            log_line(&format!("Failed to launch WebView2 bootstrapper: {e}"));
-            false
-        }
-    }
-}
-
-/// Pre-flight before Tauri window creation. Shows a clear MessageBox when Runtime looks missing.
+/// Pre-flight before Tauri window creation.
 ///
-/// Returns `false` only when the bundled bootstrapper was launched (user should finish install
-/// and relaunch). Otherwise returns `true` so a false-negative registry check cannot brick startup —
+/// With a bundled Fixed Runtime this always succeeds (no installer needed).
+/// Without it, falls back to system Evergreen detection + MessageBox guidance.
+/// Always returns `true` so a false-negative registry check cannot brick startup —
 /// window creation will MessageBox again if WebView2 truly fails.
 pub fn ensure_webview2_or_explain() -> bool {
-    if webview2_runtime_available() {
-        log_line("WebView2 Runtime: detected");
+    if find_fixed_runtime_dir().is_some() {
+        log_line("WebView2 Runtime: Fixed Version bundled (no installer required)");
         return true;
     }
 
-    log_line("WebView2 Runtime: NOT detected");
+    if webview2_runtime_available_system() {
+        log_line("WebView2 Runtime: system Evergreen detected");
+        return true;
+    }
+
+    log_line("WebView2 Runtime: NOT detected (no Fixed Runtime folder, no system Runtime)");
 
     let log_hint = log_path()
         .map(|p| format!("\n\nLog file:\n{}", p.display()))
         .unwrap_or_default();
 
-    if try_launch_webview2_bootstrapper() {
-        show_error(
-            "QuickNotes — WebView2 required",
-            &format!(
-                "Microsoft Edge WebView2 Runtime was not detected.\n\n\
-                 The WebView2 installer has been started.\n\
-                 Finish the install, then run QuickNotes.exe again.\n\n\
-                 Manual download:\n{WEBVIEW2_DOWNLOAD}{log_hint}"
-            ),
-        );
-        return false;
-    }
-
     show_error(
         "QuickNotes — WebView2 required",
         &format!(
             "Microsoft Edge WebView2 Runtime was not detected.\n\n\
-             QuickNotes needs WebView2 for its UI.\n\n\
-             Install \"Evergreen Runtime\" from:\n{WEBVIEW2_DOWNLOAD}\n\n\
-             Corporate PCs: ask IT to allow WebView2 / Edge Runtime.\n\
-             Or run MicrosoftEdgeWebview2Setup.exe next to QuickNotes.exe.\n\n\
-             Click OK to try starting anyway (if Runtime is installed but undetected).{log_hint}"
+             This portable build should include a WebView2\\ folder next to QuickNotes.exe.\n\
+             Re-download the portable zip from GitHub Releases (v0.1.3+) and unzip again.\n\n\
+             Or install Evergreen Runtime from:\n{WEBVIEW2_DOWNLOAD}\n\n\
+             Click OK to try starting anyway.{log_hint}"
         ),
     );
     true
+}
+
+fn webview2_runtime_available_system() -> bool {
+    #[cfg(windows)]
+    {
+        webview2_runtime_available_windows()
+    }
+    #[cfg(not(windows))]
+    {
+        true
+    }
+}
+
+/// Windows 10 + Fixed Version ≥120 needs App Container ACLs on the runtime folder.
+/// Best-effort; failures are logged and do not abort startup (Windows 11 usually fine).
+#[cfg(windows)]
+fn ensure_fixed_runtime_acls(runtime: &Path) {
+    let marker = runtime.join(".quicknotes-acls-ok");
+    if marker.is_file() {
+        log_line("Fixed Runtime ACLs: already applied");
+        return;
+    }
+
+    let path = runtime.to_string_lossy();
+    // ALL APPLICATION PACKAGES + ALL RESTRICTED APPLICATION PACKAGES (RX, inherit)
+    let grants = [
+        ("S-1-15-2-2", "(OI)(CI)(RX)"),
+        ("S-1-15-2-1", "(OI)(CI)(RX)"),
+    ];
+
+    for (sid, rights) in grants {
+        let grant = format!("*{sid}:{rights}");
+        match std::process::Command::new("icacls")
+            .arg(path.as_ref())
+            .arg("/grant")
+            .arg(&grant)
+            .output()
+        {
+            Ok(out) => {
+                let code = out.status.code().unwrap_or(-1);
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                log_line(&format!(
+                    "icacls grant {grant}: exit={code} stderr={}",
+                    stderr.trim()
+                ));
+            }
+            Err(e) => log_line(&format!("icacls failed to start ({grant}): {e}")),
+        }
+    }
+
+    let _ = fs::write(&marker, b"ok\n");
 }
 
 #[cfg(windows)]
@@ -253,7 +354,6 @@ fn webview2_runtime_available_windows() -> bool {
             log_line(&format!("WebView2 exe found: {}", path.display()));
             return true;
         }
-        // Versioned folders under Application\
         if let Some(parent) = path.parent() {
             if parent.is_dir() {
                 if let Ok(rd) = fs::read_dir(parent) {

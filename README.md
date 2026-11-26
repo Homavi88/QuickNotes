@@ -9,10 +9,10 @@
 Ready-to-run builds (no Node or Rust required):
 
 - **[Latest release](https://github.com/Homavi88/QuickNotes/releases/latest)** — Assets include installers and a portable zip
-- **Portable (no installer / corporate PCs):** [QuickNotes-v0.1.2-portable.zip](https://github.com/Homavi88/QuickNotes/releases/latest/download/QuickNotes-v0.1.2-portable.zip) — unzip anywhere, run `QuickNotes.exe` (see [PORTABLE.md](./PORTABLE.md))
+- **Portable (no installer / corporate PCs):** [QuickNotes-v0.1.3-portable.zip](https://github.com/Homavi88/QuickNotes/releases/latest/download/QuickNotes-v0.1.3-portable.zip) — unzip anywhere, run `QuickNotes.exe` only. Bundles Fixed Version WebView2 (no Runtime setup). See [PORTABLE.md](./PORTABLE.md).
 - Installers:
-  - [QuickNotes_0.1.2_x64_en-US.msi](https://github.com/Homavi88/QuickNotes/releases/latest/download/QuickNotes_0.1.2_x64_en-US.msi)
-  - [QuickNotes_0.1.2_x64-setup.exe](https://github.com/Homavi88/QuickNotes/releases/latest/download/QuickNotes_0.1.2_x64-setup.exe)
+  - [QuickNotes_0.1.3_x64_en-US.msi](https://github.com/Homavi88/QuickNotes/releases/latest/download/QuickNotes_0.1.3_x64_en-US.msi)
+  - [QuickNotes_0.1.3_x64-setup.exe](https://github.com/Homavi88/QuickNotes/releases/latest/download/QuickNotes_0.1.3_x64-setup.exe)
 
 These are **unsigned** MVP builds. Windows SmartScreen may warn; choose **More info → Run anyway** if prompted. Code signing can be added later via CI secrets.
 
