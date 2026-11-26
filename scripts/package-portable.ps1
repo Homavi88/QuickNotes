@@ -128,16 +128,65 @@ Write-Host "Bundled Fixed Runtime $runtimeVersion at WebView2\ ($((Get-ChildItem
 New-Item -ItemType Directory -Force -Path (Join-Path $staging "data") | Out-Null
 Set-Content -Path (Join-Path $staging "data\.gitkeep") -Value "" -NoNewline
 
+# ---------------------------------------------------------------------------
+# Zip with maximum Deflate compression.
+# Compress-Archive Optimal (~Deflate mid) left ~438 MB for v0.1.3; 7-Zip -mx=9
+# usually shrinks the same Fixed Runtime payload substantially.
+# Do NOT strip WebView2 Locales/*.pak — Microsoft marks Fixed Runtime edits as
+# unsupported (WebView2Feedback #2689; deleting locales can crash).
+# ---------------------------------------------------------------------------
+function Resolve-SevenZip {
+  $cmds = @("7z", "7za")
+  foreach ($c in $cmds) {
+    $found = Get-Command $c -ErrorAction SilentlyContinue
+    if ($found) { return $found.Source }
+  }
+  $candidates = @(
+    "$env:ProgramFiles\7-Zip\7z.exe",
+    "${env:ProgramFiles(x86)}\7-Zip\7z.exe",
+    "$env:ChocolateyInstall\bin\7z.exe"
+  ) | Where-Object { $_ -and (Test-Path $_) }
+  if ($candidates) { return $candidates[0] }
+  return $null
+}
+
+function Ensure-SevenZip {
+  $exe = Resolve-SevenZip
+  if ($exe) { return $exe }
+  Write-Host "7-Zip not found — installing via Chocolatey for -mx=9 zip compression..."
+  if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
+    throw "Neither 7-Zip nor Chocolatey is available; cannot create max-compressed portable zip."
+  }
+  & choco install 7zip.install -y --no-progress
+  if ($LASTEXITCODE -ne 0) {
+    throw "choco install 7zip.install failed with exit code $LASTEXITCODE"
+  }
+  $exe = Resolve-SevenZip
+  if (-not $exe) {
+    throw "7-Zip installed but 7z.exe still not found"
+  }
+  return $exe
+}
+
 $zipName = "QuickNotes-v$version-portable.zip"
 $zipPath = Join-Path $root $zipName
 if (Test-Path $zipPath) {
   Remove-Item -Force $zipPath
 }
 
-Write-Host "Compressing portable zip (may take a few minutes)..."
-Compress-Archive -Path $staging -DestinationPath $zipPath -CompressionLevel Optimal
+$stagingBytes = (Get-ChildItem $staging -Recurse -File | Measure-Object -Property Length -Sum).Sum
+Write-Host "Staging uncompressed size: $stagingBytes bytes"
+
+$sevenZip = Ensure-SevenZip
+Write-Host "Compressing portable zip with 7-Zip -tzip -mx=9 ($sevenZip)..."
+# Include the staging folder as the zip root (same layout as Compress-Archive -Path $staging).
+& $sevenZip a -tzip -mx=9 -mfb=258 -mpass=15 -y $zipPath $staging
+if ($LASTEXITCODE -ne 0) {
+  throw "7-Zip failed with exit code $LASTEXITCODE"
+}
 
 $zipSize = (Get-Item $zipPath).Length
-Write-Host "Created $zipPath ($zipSize bytes)"
+$ratio = if ($stagingBytes -gt 0) { [math]::Round(100.0 * $zipSize / $stagingBytes, 1) } else { 0 }
+Write-Host "Created $zipPath ($zipSize bytes; $ratio% of uncompressed staging)"
 Write-Host "Staging folder: $staging"
 Write-Host "Layout: QuickNotes.exe + WebView2\ (Fixed Runtime) + PORTABLE + data\ — no installers."

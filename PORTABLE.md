@@ -77,7 +77,7 @@ QuickNotes-portable/
   data/                   # config + notes + quicknotes.log + webview2 profile
 ```
 
-Zip size is large (~200–400+ MB) because the Fixed Runtime is included on purpose.
+Zip size is large (typically a few hundred MB) because the Fixed Runtime is included on purpose. The release zip is packed with 7-Zip maximum Deflate (`-mx=9`); Fixed Runtime files are left intact (Microsoft does not support stripping locales/resources from Fixed Version packages).
 
 ## Building the zip locally (Windows)
 
