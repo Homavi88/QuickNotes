@@ -68,6 +68,8 @@ jobs:
 
             **Portable (no install):** download `QuickNotes-*-portable.zip`, unzip anywhere, run `QuickNotes.exe`. See `PORTABLE.md` inside the zip. Autostart in Settings registers the portable exe path (no MSI).
 
+            The portable zip includes the WebView2 Evergreen Bootstrapper. If the Runtime is missing, QuickNotes shows a dialog (and writes `data/quicknotes.log`) instead of exiting silently.
+
             Built from commit `${{ github.sha }}`.
           releaseDraft: false
           prerelease: false

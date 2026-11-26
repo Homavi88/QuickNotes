@@ -1,6 +1,6 @@
 [package]
 name = "quicknotes"
-version = "0.1.1"
+version = "0.1.2"
 description = "QuickNotes — fast project notes for Windows"
 authors = ["QuickNotes"]
 edition = "2021"
@@ -24,6 +24,13 @@ dirs = "6"
 regex = "1"
 thiserror = "2"
 parking_lot = "0.12"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+  "Win32_Foundation",
+  "Win32_System_Registry",
+  "Win32_UI_WindowsAndMessaging",
+] }
 
 [profile.release]
 codegen-units = 1

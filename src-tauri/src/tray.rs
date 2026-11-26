@@ -1,3 +1,4 @@
+use crate::startup;
 use crate::windows::{show_main, show_quick};
 use tauri::{
     menu::{Menu, MenuItem},
@@ -16,12 +17,21 @@ pub fn setup_tray(app: &AppHandle, hotkey: &str) -> Result<(), String> {
     let open_folder =
         MenuItem::with_id(app, "open_folder", "Открыть папку с заметками", true, None::<&str>)
             .map_err(|e| e.to_string())?;
+    let open_log = MenuItem::with_id(app, "open_log", "Открыть лог запуска", true, None::<&str>)
+        .map_err(|e| e.to_string())?;
     let quit = MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)
         .map_err(|e| e.to_string())?;
 
     let menu = Menu::with_items(
         app,
-        &[&quick, &open_notes, &settings, &open_folder, &quit],
+        &[
+            &quick,
+            &open_notes,
+            &settings,
+            &open_folder,
+            &open_log,
+            &quit,
+        ],
     )
     .map_err(|e| e.to_string())?;
 
@@ -38,13 +48,19 @@ pub fn setup_tray(app: &AppHandle, hotkey: &str) -> Result<(), String> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "quick" => {
-                let _ = show_quick(app);
+                if let Err(e) = show_quick(app) {
+                    startup::log_line(&format!("tray quick failed: {e}"));
+                }
             }
             "open_notes" => {
-                let _ = show_main(app, Some("notes"));
+                if let Err(e) = show_main(app, Some("notes")) {
+                    startup::log_line(&format!("tray open_notes failed: {e}"));
+                }
             }
             "settings" => {
-                let _ = show_main(app, Some("settings"));
+                if let Err(e) = show_main(app, Some("settings")) {
+                    startup::log_line(&format!("tray settings failed: {e}"));
+                }
             }
             "open_folder" => {
                 if let Some(state) = app.try_state::<crate::state::AppState>() {
@@ -52,7 +68,13 @@ pub fn setup_tray(app: &AppHandle, hotkey: &str) -> Result<(), String> {
                     let _ = app.opener().open_path(dir, None::<&str>);
                 }
             }
+            "open_log" => {
+                if let Some(path) = startup::log_path() {
+                    let _ = app.opener().open_path(path.to_string_lossy().to_string(), None::<&str>);
+                }
+            }
             "quit" => {
+                startup::log_line("tray: quit");
                 app.exit(0);
             }
             _ => {}
@@ -64,7 +86,9 @@ pub fn setup_tray(app: &AppHandle, hotkey: &str) -> Result<(), String> {
                 ..
             } = event
             {
-                let _ = show_quick(tray.app_handle());
+                if let Err(e) = show_quick(tray.app_handle()) {
+                    startup::log_line(&format!("tray left-click failed: {e}"));
+                }
             }
         })
         .build(app)

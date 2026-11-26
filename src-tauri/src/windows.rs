@@ -7,7 +7,9 @@ pub fn create_windows(app: &AppHandle) -> Result<(), String> {
             .inner_size(1000.0, 680.0)
             .min_inner_size(720.0, 480.0)
             .resizable(true)
-            .visible(true)
+            // Tray-first: stay hidden until the user opens Notes from the tray / hotkey.
+            .visible(false)
+            .skip_taskbar(true)
             .center()
             .build()
             .map_err(|e| format!("Failed to create main window: {e}"))?;
@@ -71,6 +73,7 @@ pub fn show_main(app: &AppHandle, section: Option<&str>) -> Result<(), String> {
         return Err("Main window missing".into());
     };
     let _ = win.unminimize();
+    let _ = win.set_skip_taskbar(false);
     win.show().map_err(|e| e.to_string())?;
     win.set_focus().map_err(|e| e.to_string())?;
     if let Some(section) = section {
