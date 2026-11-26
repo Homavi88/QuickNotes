@@ -7,20 +7,29 @@ import {
   isEnabled as isAutostartEnabled,
 } from "@tauri-apps/plugin-autostart";
 import { invoke } from "@tauri-apps/api/core";
+import { eventKeyToken, isModifierOnlyKey } from "../../lib/hotkey";
 import { useAppStore } from "../../store/useAppStore";
 import type { RuntimePaths, Settings, Theme } from "../../types";
 import { PROJECT_COLORS } from "../../types";
 
+const SAVE_HOTKEY_PRESETS = ["Ctrl+Enter", "Enter", "Ctrl+S"] as const;
+
 export function SettingsView() {
   const { config, updateSettings } = useAppStore();
   const [local, setLocal] = useState<Settings | null>(null);
-  const [recording, setRecording] = useState(false);
+  const [recording, setRecording] = useState<"global" | "save" | null>(null);
   const [hotkeyError, setHotkeyError] = useState<string | null>(null);
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
   const [runtimePaths, setRuntimePaths] = useState<RuntimePaths | null>(null);
 
   useEffect(() => {
-    if (config) setLocal({ ...config.settings });
+    if (config) {
+      setLocal({
+        ...config.settings,
+        saveHotkey: config.settings.saveHotkey || "Ctrl+Enter",
+        saveOnHide: config.settings.saveOnHide ?? false,
+      });
+    }
   }, [config]);
 
   useEffect(() => {
@@ -54,7 +63,7 @@ export function SettingsView() {
       <div className="mb-6">
         <h2 className="text-xl font-semibold">Настройки</h2>
         <p className="text-sm text-ink-muted">
-          Хоткей, автозапуск, тема и хранение заметок.
+          Хоткеи, автосохранение, тема и хранение заметок.
         </p>
       </div>
 
@@ -62,23 +71,99 @@ export function SettingsView() {
         <Field label="Глобальный хоткей">
           <button
             type="button"
-            onClick={() => setRecording(true)}
+            onClick={() => setRecording("global")}
             className="rounded-xl border border-line bg-surface-muted px-3 py-2 text-sm"
           >
-            {recording ? "Нажмите сочетание…" : local.hotkey}
+            {recording === "global" ? "Нажмите сочетание…" : local.hotkey}
           </button>
-          {recording && (
+          {recording === "global" && (
             <HotkeyRecorder
-              onCancel={() => setRecording(false)}
+              allowBareKey={false}
+              onCancel={() => setRecording(null)}
               onRecord={(hotkey) => {
                 patch({ hotkey });
-                setRecording(false);
+                setRecording(null);
               }}
             />
           )}
           {hotkeyError && (
             <div className="mt-1 text-xs text-rose-400">{hotkeyError}</div>
           )}
+          <p className="mt-2 text-xs text-ink-muted">
+            Показывает окно быстрого ввода из любого приложения.
+          </p>
+        </Field>
+
+        <Field label="Хоткей сохранения (быстрый ввод)">
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setRecording("save")}
+              className="rounded-xl border border-line bg-surface-muted px-3 py-2 text-sm"
+            >
+              {recording === "save" ? "Нажмите сочетание…" : local.saveHotkey}
+            </button>
+            {SAVE_HOTKEY_PRESETS.map((preset) => (
+              <button
+                key={preset}
+                type="button"
+                onClick={() => patch({ saveHotkey: preset })}
+                className={`rounded-xl px-3 py-2 text-sm ${
+                  local.saveHotkey === preset
+                    ? "bg-accent text-white"
+                    : "border border-line bg-surface-muted"
+                }`}
+              >
+                {preset}
+              </button>
+            ))}
+          </div>
+          {recording === "save" && (
+            <HotkeyRecorder
+              allowBareKey
+              onCancel={() => setRecording(null)}
+              onRecord={(hotkey) => {
+                patch({ saveHotkey: hotkey });
+                setRecording(null);
+              }}
+            />
+          )}
+          <p className="mt-2 text-xs text-ink-muted">
+            По умолчанию Ctrl+Enter. Можно назначить Enter или своё сочетание.
+            Esc по-прежнему закрывает окно.
+          </p>
+        </Field>
+
+        <Toggle
+          label="Сохранять при закрытии / скрытии окна"
+          checked={local.saveOnHide}
+          onChange={(saveOnHide) => patch({ saveOnHide })}
+        />
+        <p className="-mt-3 px-1 text-xs text-ink-muted">
+          Если включено: Esc, потеря фокуса или скрытие окна с непустым текстом
+          сохраняют заметку в выбранный проект (вместо черновика). Если
+          выключено — как раньше: текст остаётся черновиком.
+        </p>
+
+        <Field label="Горячие клавиши быстрого ввода">
+          <ul className="space-y-1.5 text-sm text-ink-muted">
+            <HotkeyHint keys={local.saveHotkey} desc="Сохранить заметку" />
+            <HotkeyHint
+              keys="Esc"
+              desc={
+                local.saveOnHide
+                  ? "Сохранить (если есть текст) и закрыть"
+                  : "Закрыть (черновик сохраняется)"
+              }
+            />
+            <HotkeyHint keys="Ctrl+1…9" desc="Выбрать проект по номеру" />
+            <HotkeyHint keys="Ctrl+↑ / Ctrl+↓" desc="Переключить проект" />
+            <HotkeyHint keys="Ctrl+P" desc="Список проектов с поиском" />
+            <HotkeyHint
+              keys={local.hotkey}
+              desc="Глобальный вызов окна (из любой программы)"
+            />
+          </ul>
         </Field>
 
         <Toggle
@@ -222,6 +307,17 @@ export function SettingsView() {
   );
 }
 
+function HotkeyHint({ keys, desc }: { keys: string; desc: string }) {
+  return (
+    <li className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+      <kbd className="rounded bg-surface-muted px-1.5 py-0.5 font-mono text-xs text-ink">
+        {keys}
+      </kbd>
+      <span>{desc}</span>
+    </li>
+  );
+}
+
 function Field({
   label,
   children,
@@ -262,9 +358,12 @@ function Toggle({
 function HotkeyRecorder({
   onRecord,
   onCancel,
+  allowBareKey,
 }: {
   onRecord: (hotkey: string) => void;
   onCancel: () => void;
+  /** Allow a key without Ctrl/Alt/Shift (e.g. Enter alone for save). */
+  allowBareKey?: boolean;
 }) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -274,41 +373,29 @@ function HotkeyRecorder({
         onCancel();
         return;
       }
+      if (isModifierOnlyKey(e)) return;
       const parts: string[] = [];
       if (e.ctrlKey || e.metaKey) parts.push("Ctrl");
       if (e.altKey) parts.push("Alt");
       if (e.shiftKey) parts.push("Shift");
-      const key = normalizeKey(e);
+      const key = eventKeyToken(e);
       if (!key) return;
-      if (["Control", "Alt", "Shift", "Meta"].includes(e.key)) return;
+      if (!allowBareKey && parts.length === 0) return;
+      // Never bind Esc as a save/global hotkey via recorder.
+      if (key === "Esc") return;
       parts.push(key);
       onRecord(parts.join("+"));
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [onRecord, onCancel]);
+  }, [onRecord, onCancel, allowBareKey]);
 
   return (
-    <div className="mt-2 text-xs text-ink-muted">Ожидание… Esc — отмена</div>
+    <div className="mt-2 text-xs text-ink-muted">
+      Ожидание… Esc — отмена
+      {allowBareKey ? " · можно без модификаторов (например Enter)" : ""}
+    </div>
   );
-}
-
-function normalizeKey(e: KeyboardEvent): string | null {
-  if (e.code.startsWith("Key") && e.code.length === 4) return e.code.slice(3);
-  if (e.code.startsWith("Digit")) return e.code.slice(5);
-  const map: Record<string, string> = {
-    Space: "Space",
-    Enter: "Enter",
-    Tab: "Tab",
-    ArrowUp: "Up",
-    ArrowDown: "Down",
-    ArrowLeft: "Left",
-    ArrowRight: "Right",
-    Escape: "Esc",
-  };
-  if (map[e.code]) return map[e.code];
-  if (e.key.length === 1) return e.key.toUpperCase();
-  return null;
 }
 
 function AutostartHint() {

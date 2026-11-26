@@ -2,11 +2,15 @@ export type Theme = "dark" | "light" | "system";
 
 export interface Settings {
   hotkey: string;
+  /** In-window shortcut to save the quick note (default Ctrl+Enter). */
+  saveHotkey: string;
   autostart: boolean;
   theme: Theme;
   accentColor: string;
   storageDir: string;
   hideOnBlur: boolean;
+  /** Save non-empty text to the selected project on Esc / blur / hide. */
+  saveOnHide: boolean;
   glassEffect: boolean;
   lastProjectId: string | null;
 }

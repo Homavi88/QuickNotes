@@ -27,13 +27,24 @@ pub struct RuntimePaths {
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
     pub hotkey: String,
+    /// In-window shortcut that saves the quick note (e.g. "Ctrl+Enter", "Enter").
+    #[serde(default = "default_save_hotkey")]
+    pub save_hotkey: String,
     pub autostart: bool,
     pub theme: Theme,
     pub accent_color: String,
     pub storage_dir: String,
     pub hide_on_blur: bool,
+    /// When true, Esc / blur / hide with non-empty text saves to the selected project
+    /// instead of only keeping a draft.
+    #[serde(default)]
+    pub save_on_hide: bool,
     pub glass_effect: bool,
     pub last_project_id: Option<String>,
+}
+
+fn default_save_hotkey() -> String {
+    "Ctrl+Enter".into()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -127,11 +138,13 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             hotkey: "Ctrl+Alt+N".into(),
+            save_hotkey: default_save_hotkey(),
             autostart: false,
             theme: Theme::Dark,
             accent_color: "#7C5CFF".into(),
             storage_dir: default_storage_dir(),
             hide_on_blur: true,
+            save_on_hide: false,
             glass_effect: true,
             last_project_id: None,
         }
@@ -217,5 +230,22 @@ mod tests {
     fn config_path_ends_with_config_json() {
         let path = config_path();
         assert_eq!(path.file_name().and_then(|s| s.to_str()), Some("config.json"));
+    }
+
+    #[test]
+    fn settings_defaults_new_fields_from_legacy_json() {
+        let raw = r#"{
+            "hotkey": "Ctrl+Alt+N",
+            "autostart": false,
+            "theme": "dark",
+            "accentColor": "#7C5CFF",
+            "storageDir": "C:/notes",
+            "hideOnBlur": true,
+            "glassEffect": true,
+            "lastProjectId": null
+        }"#;
+        let s: Settings = serde_json::from_str(raw).expect("legacy settings parse");
+        assert_eq!(s.save_hotkey, "Ctrl+Enter");
+        assert!(!s.save_on_hide);
     }
 }

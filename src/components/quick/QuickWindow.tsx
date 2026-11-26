@@ -10,6 +10,7 @@ import {
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "../../lib/api";
+import { formatHotkeyLabel, matchesHotkey } from "../../lib/hotkey";
 import { applyTheme } from "../../lib/theme";
 import type { AppConfig, Project } from "../../types";
 
@@ -26,6 +27,8 @@ export function QuickWindow() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const draftTimer = useRef<number | null>(null);
   const hidingRef = useRef(false);
+  const textRef = useRef(text);
+  const selectedIdRef = useRef<string | null>(null);
 
   const projects = useMemo(() => {
     const list = [...(config?.projects ?? [])].sort((a, b) => a.order - b.order);
@@ -39,6 +42,13 @@ export function QuickWindow() {
   }, [config, projectQuery]);
 
   const selected = projects.find((p) => p.id === projectId) ?? projects[0] ?? null;
+  const saveHotkey = formatHotkeyLabel(
+    config?.settings.saveHotkey ?? "Ctrl+Enter",
+  );
+  const saveOnHide = config?.settings.saveOnHide ?? false;
+
+  textRef.current = text;
+  selectedIdRef.current = selected?.id ?? null;
 
   const load = useCallback(async () => {
     const cfg = await api.getConfig();
@@ -56,41 +66,6 @@ export function QuickWindow() {
   useEffect(() => {
     void load();
   }, [load]);
-
-  useEffect(() => {
-    const unsubs: Array<() => void> = [];
-    void listen("quick-shown", async () => {
-      hidingRef.current = false;
-      setVisible(true);
-      setSavedFlash(false);
-      setError(null);
-      setOpenList(false);
-      await load();
-      requestAnimationFrame(() => textareaRef.current?.focus());
-    });
-    void listen("quick-hidden", () => setVisible(false));
-    void listen<AppConfig>("config-updated", (e) => {
-      setConfig(e.payload);
-      applyTheme(e.payload.settings.theme, e.payload.settings.accentColor);
-    });
-    void listen("quick-blur", () => {
-      void handleBlurHide();
-    });
-    return () => unsubs.forEach((u) => u());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [load]);
-
-  // Detect initial visibility if window was shown before React mounted.
-  useEffect(() => {
-    void getCurrentWindow()
-      .isVisible()
-      .then((v) => {
-        if (v) {
-          setVisible(true);
-          requestAnimationFrame(() => textareaRef.current?.focus());
-        }
-      });
-  }, []);
 
   const persistDraft = useCallback(
     async (value: string, pid: string | null) => {
@@ -110,24 +85,111 @@ export function QuickWindow() {
     }, 250);
   };
 
-  const hide = async (saveDraftNow: boolean) => {
+  const hide = useCallback(async (saveDraftNow: boolean) => {
     if (hidingRef.current) return;
     hidingRef.current = true;
     if (saveDraftNow) {
-      await persistDraft(text, selected?.id ?? null);
+      await persistDraft(textRef.current, selectedIdRef.current);
     }
     setVisible(false);
-    // Allow exit animation
     window.setTimeout(() => {
       void api.hideQuickWindow();
     }, 160);
-  };
+  }, [persistDraft]);
 
-  const handleBlurHide = async () => {
+  const save = useCallback(
+    async (opts?: { flash?: boolean }) => {
+      const flash = opts?.flash ?? true;
+      const pid = selectedIdRef.current;
+      const value = textRef.current;
+      if (!pid) {
+        setError("Создайте проект в главном окне");
+        return false;
+      }
+      if (!value.trim()) {
+        setError("Пустая заметка");
+        return false;
+      }
+      setSaving(true);
+      setError(null);
+      try {
+        if (draftTimer.current) window.clearTimeout(draftTimer.current);
+        await api.saveNote(pid, value);
+        setText("");
+        if (flash) {
+          setSavedFlash(true);
+          window.setTimeout(() => {
+            setSavedFlash(false);
+            void hide(false);
+          }, 400);
+        } else {
+          await hide(false);
+        }
+        return true;
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+        hidingRef.current = false;
+        return false;
+      } finally {
+        setSaving(false);
+      }
+    },
+    [hide],
+  );
+
+  /** Esc / blur / hide: either auto-save or keep draft. */
+  const dismiss = useCallback(async () => {
+    if (saving || savedFlash) return;
+    const value = textRef.current;
+    const pid = selectedIdRef.current;
+    if (saveOnHide && value.trim() && pid) {
+      await save({ flash: false });
+      return;
+    }
+    await hide(true);
+  }, [hide, save, saveOnHide, saving, savedFlash]);
+
+  const handleBlurHide = useCallback(async () => {
     if (!config?.settings.hideOnBlur) return;
     if (saving || savedFlash || openList) return;
-    await hide(true);
-  };
+    await dismiss();
+  }, [config?.settings.hideOnBlur, dismiss, openList, saving, savedFlash]);
+
+  useEffect(() => {
+    const unsubs: Array<() => void> = [];
+    void listen("quick-shown", async () => {
+      hidingRef.current = false;
+      setVisible(true);
+      setSavedFlash(false);
+      setError(null);
+      setOpenList(false);
+      await load();
+      requestAnimationFrame(() => textareaRef.current?.focus());
+    }).then((u) => unsubs.push(u));
+    void listen("quick-hidden", () => setVisible(false)).then((u) =>
+      unsubs.push(u),
+    );
+    void listen<AppConfig>("config-updated", (e) => {
+      setConfig(e.payload);
+      applyTheme(e.payload.settings.theme, e.payload.settings.accentColor);
+    }).then((u) => unsubs.push(u));
+    void listen("quick-blur", () => {
+      void handleBlurHide();
+    }).then((u) => unsubs.push(u));
+    return () => unsubs.forEach((u) => u());
+  }, [load, handleBlurHide]);
+
+  // Detect initial visibility if window was shown before React mounted.
+  useEffect(() => {
+    void getCurrentWindow()
+      .isVisible()
+      .then((v) => {
+        if (v) {
+          setVisible(true);
+          requestAnimationFrame(() => textareaRef.current?.focus());
+        }
+      });
+  }, []);
 
   const selectProject = async (p: Project) => {
     setProjectId(p.id);
@@ -148,43 +210,16 @@ export function QuickWindow() {
     void selectProject(next);
   };
 
-  const save = async () => {
-    if (!selected) {
-      setError("Создайте проект в главном окне");
-      return;
-    }
-    if (!text.trim()) {
-      setError("Пустая заметка");
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    try {
-      await api.saveNote(selected.id, text);
-      setText("");
-      setSavedFlash(true);
-      window.setTimeout(() => {
-        setSavedFlash(false);
-        void hide(false);
-      }, 400);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      hidingRef.current = false;
-    } finally {
-      setSaving(false);
-    }
-  };
-
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
-        void hide(true);
+        void dismiss();
         return;
       }
-      if (e.ctrlKey && e.key === "Enter") {
+      if (matchesHotkey(e, saveHotkey)) {
         e.preventDefault();
-        void save();
+        void save({ flash: true });
         return;
       }
       if (e.ctrlKey && (e.key === "p" || e.key === "P")) {
@@ -211,7 +246,7 @@ export function QuickWindow() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [text, selected, projects, config]);
+  }, [text, selected, projects, config, saveHotkey, dismiss, save]);
 
   const glass = config?.settings.glassEffect ?? true;
 
@@ -332,11 +367,12 @@ export function QuickWindow() {
             <div className="flex items-center justify-between border-t border-line/60 px-3 py-2 text-[11px] text-ink-faint">
               <div className="flex gap-3">
                 <span>
-                  <kbd className="rounded bg-surface-muted px-1">Ctrl+Enter</kbd>{" "}
+                  <kbd className="rounded bg-surface-muted px-1">{saveHotkey}</kbd>{" "}
                   сохранить
                 </span>
                 <span>
-                  <kbd className="rounded bg-surface-muted px-1">Esc</kbd> закрыть
+                  <kbd className="rounded bg-surface-muted px-1">Esc</kbd>{" "}
+                  {saveOnHide ? "сохранить и закрыть" : "закрыть"}
                 </span>
               </div>
               {error && <span className="text-rose-400">{error}</span>}
