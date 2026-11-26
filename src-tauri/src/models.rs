@@ -234,7 +234,8 @@ mod tests {
 
     #[test]
     fn settings_defaults_new_fields_from_legacy_json() {
-        let raw = r#"{
+        // r## so "#7C5CFF" does not terminate the raw string early
+        let raw = r##"{
             "hotkey": "Ctrl+Alt+N",
             "autostart": false,
             "theme": "dark",
@@ -243,7 +244,7 @@ mod tests {
             "hideOnBlur": true,
             "glassEffect": true,
             "lastProjectId": null
-        }"#;
+        }"##;
         let s: Settings = serde_json::from_str(raw).expect("legacy settings parse");
         assert_eq!(s.save_hotkey, "Ctrl+Enter");
         assert!(!s.save_on_hide);
