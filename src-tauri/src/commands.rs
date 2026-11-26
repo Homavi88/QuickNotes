@@ -5,6 +5,7 @@ use crate::notes::{
     write_project_notes,
 };
 use crate::state::AppState;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
@@ -340,6 +341,74 @@ pub fn get_storage_dir(state: State<'_, AppState>) -> Result<String, String> {
 #[tauri::command]
 pub fn get_runtime_paths() -> Result<RuntimePaths, String> {
     Ok(runtime_paths())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RelocateDataRootInput {
+    /// Absolute parent directory chosen by the user. Data goes to `{parent}/QuickNotes/data`.
+    pub parent_path: String,
+    /// When true, copy existing config/notes into the new folder (old folder is kept).
+    pub copy_existing: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RelocateDataRootResult {
+    pub config: AppConfig,
+    pub paths: RuntimePaths,
+    pub migrated: bool,
+}
+
+#[tauri::command]
+pub fn relocate_data_root(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    input: RelocateDataRootInput,
+) -> Result<RelocateDataRootResult, String> {
+    let parent = std::path::PathBuf::from(input.parent_path.trim());
+    if parent.as_os_str().is_empty() {
+        return Err("Выберите папку для данных".into());
+    }
+    let (_new_dir, cfg) =
+        crate::data_root::relocate_data_parent(&parent, input.copy_existing)?;
+    {
+        let mut guard = state.config.lock();
+        *guard = cfg.clone();
+    }
+    let paths = runtime_paths();
+    let _ = app.emit("config-updated", &cfg);
+    Ok(RelocateDataRootResult {
+        config: cfg,
+        paths,
+        migrated: input.copy_existing,
+    })
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResetDataRootInput {
+    pub copy_back: bool,
+}
+
+#[tauri::command]
+pub fn reset_data_root(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    input: ResetDataRootInput,
+) -> Result<RelocateDataRootResult, String> {
+    let (_new_dir, cfg) = crate::data_root::reset_data_parent_to_default(input.copy_back)?;
+    {
+        let mut guard = state.config.lock();
+        *guard = cfg.clone();
+    }
+    let paths = runtime_paths();
+    let _ = app.emit("config-updated", &cfg);
+    Ok(RelocateDataRootResult {
+        config: cfg,
+        paths,
+        migrated: input.copy_back,
+    })
 }
 
 #[tauri::command]

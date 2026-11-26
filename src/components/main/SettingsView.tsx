@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 import {
@@ -7,6 +7,7 @@ import {
   isEnabled as isAutostartEnabled,
 } from "@tauri-apps/plugin-autostart";
 import { invoke } from "@tauri-apps/api/core";
+import { api } from "../../lib/api";
 import { eventKeyToken, isModifierOnlyKey } from "../../lib/hotkey";
 import { useAppStore } from "../../store/useAppStore";
 import type { RuntimePaths, Settings, Theme } from "../../types";
@@ -14,13 +15,22 @@ import { PROJECT_COLORS } from "../../types";
 
 const SAVE_HOTKEY_PRESETS = ["Ctrl+Enter", "Enter", "Ctrl+S"] as const;
 
+function joinDataDir(parent: string, suffix: string): string {
+  const sep = parent.includes("\\") && !parent.includes("/") ? "\\" : "/";
+  const clean = parent.replace(/[\\/]+$/, "");
+  return `${clean}${sep}${suffix.replace(/\//g, sep)}`;
+}
+
 export function SettingsView() {
-  const { config, updateSettings } = useAppStore();
+  const { config, updateSettings, applyConfig } = useAppStore();
   const [local, setLocal] = useState<Settings | null>(null);
   const [recording, setRecording] = useState<"global" | "save" | null>(null);
   const [hotkeyError, setHotkeyError] = useState<string | null>(null);
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
   const [runtimePaths, setRuntimePaths] = useState<RuntimePaths | null>(null);
+  /** Pending chosen parent for app data (`…/QuickNotes/data`). null = no pending change. */
+  const [pendingDataParent, setPendingDataParent] = useState<string | null>(null);
+  const [pendingResetDefault, setPendingResetDefault] = useState(false);
 
   useEffect(() => {
     if (config) {
@@ -32,11 +42,33 @@ export function SettingsView() {
     }
   }, [config]);
 
+  const refreshPaths = async () => {
+    try {
+      setRuntimePaths(await api.getRuntimePaths());
+    } catch {
+      setRuntimePaths(null);
+    }
+  };
+
   useEffect(() => {
-    void invoke<RuntimePaths>("get_runtime_paths")
-      .then(setRuntimePaths)
-      .catch(() => setRuntimePaths(null));
+    void refreshPaths();
   }, []);
+
+  const previewDataDir = useMemo(() => {
+    if (!runtimePaths) return null;
+    if (pendingResetDefault) {
+      return runtimePaths.portable
+        ? joinDataDir(runtimePaths.exeDir, "data")
+        : runtimePaths.configDir; // will be AppData after reset; show default parent/data for portable
+    }
+    if (pendingDataParent) {
+      return joinDataDir(
+        pendingDataParent,
+        runtimePaths.dataDirPreviewSuffix || "QuickNotes/data",
+      );
+    }
+    return runtimePaths.configDir;
+  }, [runtimePaths, pendingDataParent, pendingResetDefault]);
 
   if (!local) return null;
 
@@ -47,10 +79,61 @@ export function SettingsView() {
     setHotkeyError(null);
     setSavedMsg(null);
     try {
-      await invoke("reregister_hotkey", { hotkey: local.hotkey });
-      if (local.autostart) await enableAutostart();
+      const dataChanging =
+        pendingResetDefault ||
+        (pendingDataParent !== null &&
+          pendingDataParent !== (runtimePaths?.dataParent ?? ""));
+
+      if (dataChanging && runtimePaths) {
+        if (pendingResetDefault) {
+          const doReset = window.confirm(
+            "Сбросить папку данных на расположение по умолчанию?\n" +
+              "(Портативный: рядом с exe\\data. Установленный: AppData.)\n" +
+              "Старые файлы не удаляются.",
+          );
+          if (doReset) {
+            const copy = window.confirm(
+              "Скопировать текущие данные в папку по умолчанию?\n\nOK — копировать.\nОтмена — без копирования.",
+            );
+            const result = await api.resetDataRoot(copy);
+            applyConfig(result.config);
+            setRuntimePaths(result.paths);
+          }
+        } else if (pendingDataParent) {
+          const target = joinDataDir(
+            pendingDataParent,
+            runtimePaths.dataDirPreviewSuffix || "QuickNotes/data",
+          );
+          const doMove = window.confirm(
+            `Данные будут в:\n${target}\n\nПродолжить? Старая папка не удаляется.`,
+          );
+          if (doMove) {
+            const copy = window.confirm(
+              "Скопировать существующие config и заметки в новое место?\n\nOK — копировать.\nОтмена — создать пустую папку данных.",
+            );
+            const result = await api.relocateDataRoot(pendingDataParent, copy);
+            applyConfig(result.config);
+            setRuntimePaths(result.paths);
+          }
+        }
+        setPendingDataParent(null);
+        setPendingResetDefault(false);
+      }
+
+      const latest = useAppStore.getState().config?.settings;
+      const merged = latest
+        ? {
+            ...local,
+            storageDir: latest.storageDir,
+            lastProjectId: latest.lastProjectId,
+          }
+        : local;
+
+      await invoke("reregister_hotkey", { hotkey: merged.hotkey });
+      if (merged.autostart) await enableAutostart();
       else await disableAutostart();
-      await updateSettings(local);
+      await updateSettings(merged);
+      await refreshPaths();
       setSavedMsg("Сохранено");
       window.setTimeout(() => setSavedMsg(null), 1500);
     } catch (e) {
@@ -177,27 +260,71 @@ export function SettingsView() {
         </p>
 
         {runtimePaths && (
-          <Field label={runtimePaths.portable ? "Портативный режим" : "Хранение данных"}>
-            <div className="space-y-1 text-xs text-ink-muted">
-              {runtimePaths.portable ? (
-                <p>
-                  Рядом с exe найден маркер PORTABLE. Конфиг и заметки по
-                  умолчанию пишутся в папку{" "}
-                  <code className="text-ink">{runtimePaths.configDir}</code>{" "}
-                  (без Program Files / без прав администратора).
-                </p>
-              ) : (
-                <p>
-                  Конфиг:{" "}
-                  <code className="text-ink">{runtimePaths.configPath}</code>
-                  . Заметки по умолчанию:{" "}
-                  <code className="text-ink">
-                    {runtimePaths.defaultStorageDir}
-                  </code>
-                  .
-                </p>
+          <Field label="Папка данных приложения">
+            <p className="mb-2 text-xs text-ink-muted">
+              {runtimePaths.portable
+                ? "Портативный режим (маркер PORTABLE). Exe остаётся на месте — переносится только папка data."
+                : "Установленная сборка. Можно вынести config и заметки в другую папку."}{" "}
+              Выбранный каталог получит{" "}
+              <code className="text-ink">QuickNotes/data/</code> внутри.
+            </p>
+            <div className="mb-2 text-xs text-ink-muted">
+              Сейчас:{" "}
+              <code className="break-all text-ink">{runtimePaths.configDir}</code>
+            </div>
+            {previewDataDir &&
+              previewDataDir !== runtimePaths.configDir && (
+                <div className="mb-2 text-xs text-amber-400">
+                  После сохранения:{" "}
+                  <code className="break-all">{previewDataDir}</code>
+                </div>
+              )}
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="rounded-xl border border-line px-3 py-2 text-sm hover:bg-surface-muted"
+                onClick={async () => {
+                  const dir = await open({
+                    directory: true,
+                    multiple: false,
+                    defaultPath:
+                      pendingDataParent ??
+                      runtimePaths.dataParent ??
+                      runtimePaths.defaultDataParent,
+                  });
+                  if (typeof dir === "string") {
+                    setPendingDataParent(dir);
+                    setPendingResetDefault(false);
+                  }
+                }}
+              >
+                Выбрать…
+              </button>
+              <button
+                type="button"
+                className="rounded-xl border border-line px-3 py-2 text-sm hover:bg-surface-muted"
+                onClick={() => void openPath(runtimePaths.configDir)}
+              >
+                Открыть текущую
+              </button>
+              {(runtimePaths.dataParent || pendingDataParent) && (
+                <button
+                  type="button"
+                  className="rounded-xl border border-line px-3 py-2 text-sm hover:bg-surface-muted"
+                  onClick={() => {
+                    setPendingDataParent(null);
+                    setPendingResetDefault(true);
+                  }}
+                >
+                  По умолчанию
+                </button>
               )}
             </div>
+            <p className="mt-2 text-xs text-ink-faint">
+              Указатель пути пишется в{" "}
+              <code className="text-ink">data-root.txt</code> рядом с exe (и в
+              AppData). После переноса лучше перезапустить приложение.
+            </p>
           </Field>
         )}
 

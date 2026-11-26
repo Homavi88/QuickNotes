@@ -32,7 +32,7 @@ Windows may show SmartScreen for unsigned builds: **More info → Run anyway**. 
 
 ## Data locations (portable package)
 
-The zip includes a `PORTABLE` marker file next to `QuickNotes.exe`. While that marker is present:
+The zip includes a `PORTABLE` marker file next to `QuickNotes.exe`. While that marker is present (and no custom data location is set):
 
 | What | Path |
 |------|------|
@@ -43,7 +43,13 @@ The zip includes a `PORTABLE` marker file next to `QuickNotes.exe`. While that m
 
 Everything stays under the unzipped folder. Safe for USB and user-writable directories; nothing is written under Program Files.
 
-You can still change the notes folder in Settings to e.g. `%LOCALAPPDATA%\QuickNotes` if you prefer profile-backed storage while keeping the portable exe.
+### Custom data folder
+
+In **Settings → Папка данных приложения** you can pick any writable parent directory. QuickNotes creates `{Chosen}\QuickNotes\data\` there (config + notes + log + WebView2 profile). The portable exe stays where it is.
+
+A small pointer file `data-root.txt` next to `QuickNotes.exe` (and a bootstrap copy under AppData when needed) stores the chosen parent so the next launch finds the data. Existing data can be **copied** on change; the old folder is not deleted. Restart the app after relocating so WebView2 picks up the new profile path.
+
+You can still change only the notes folder in Settings to e.g. `%LOCALAPPDATA%\QuickNotes` if you prefer profile-backed note storage while keeping config elsewhere.
 
 ### Installed (MSI / NSIS) layout
 

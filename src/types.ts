@@ -22,6 +22,11 @@ export interface RuntimePaths {
   configDir: string;
   configPath: string;
   defaultStorageDir: string;
+  /** User-chosen parent when data relocated (`{parent}/QuickNotes/data`). */
+  dataParent: string | null;
+  defaultDataParent: string;
+  /** Always `QuickNotes/data` under the chosen parent. */
+  dataDirPreviewSuffix: string;
 }
 
 export interface Project {
@@ -43,6 +48,12 @@ export interface AppConfig {
   settings: Settings;
   projects: Project[];
   draft?: Draft | null;
+}
+
+export interface RelocateDataRootResult {
+  config: AppConfig;
+  paths: RuntimePaths;
+  migrated: boolean;
 }
 
 export interface Note {
@@ -69,17 +80,4 @@ export const PROJECT_COLORS = [
   "#E76F51",
 ] as const;
 
-export const PROJECT_EMOJIS = [
-  "🚀",
-  "💡",
-  "📝",
-  "🎯",
-  "🔧",
-  "📚",
-  "🌟",
-  "🧠",
-  "📦",
-  "🎨",
-  "💼",
-  "🔥",
-] as const;
+export { PROJECT_EMOJIS, EMOJI_CATEGORIES, PROJECT_EMOJI_FAVORITES } from "./lib/emojis";
