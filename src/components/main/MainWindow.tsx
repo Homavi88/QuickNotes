@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { ReminderDueBanner } from "../ReminderDueBanner";
 import { useAppStore } from "../../store/useAppStore";
 import type { AppConfig, MainSection } from "../../types";
 import { NotesView } from "./NotesView";
@@ -48,7 +49,8 @@ export function MainWindow() {
   }
 
   return (
-    <div className="flex h-full bg-surface text-ink">
+    <div className="relative flex h-full bg-surface text-ink">
+      <ReminderDueBanner onChanged={() => void refreshNotes()} />
       <Sidebar section={section} onChange={(s: MainSection) => setSection(s)} />
       <main className="flex min-w-0 flex-1 flex-col">
         {section === "notes" && <NotesView />}

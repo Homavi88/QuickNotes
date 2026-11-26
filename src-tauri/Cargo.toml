@@ -1,6 +1,6 @@
 [package]
 name = "quicknotes"
-version = "0.1.6"
+version = "0.1.7"
 description = "QuickNotes — fast project notes for Windows"
 authors = ["QuickNotes"]
 edition = "2021"
@@ -24,6 +24,7 @@ dirs = "6"
 regex = "1"
 thiserror = "2"
 parking_lot = "0.12"
+tauri-plugin-notification = "2"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [

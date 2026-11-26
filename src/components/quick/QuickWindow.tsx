@@ -9,10 +9,16 @@ import {
 } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import {
+  ReminderEditor,
+  emptyReminderDraft,
+  reminderDraftToInput,
+  type ReminderDraft,
+} from "../ReminderEditor";
 import { api } from "../../lib/api";
 import { formatHotkeyLabel, matchesHotkey } from "../../lib/hotkey";
 import { applyTheme } from "../../lib/theme";
-import type { AppConfig, Project } from "../../types";
+import type { AppConfig, Project, RemindersMode } from "../../types";
 
 export function QuickWindow() {
   const [config, setConfig] = useState<AppConfig | null>(null);
@@ -24,11 +30,15 @@ export function QuickWindow() {
   const [savedFlash, setSavedFlash] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [visible, setVisible] = useState(false);
+  const [reminder, setReminder] = useState<ReminderDraft>(
+    emptyReminderDraft("both"),
+  );
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const draftTimer = useRef<number | null>(null);
   const hidingRef = useRef(false);
   const textRef = useRef(text);
   const selectedIdRef = useRef<string | null>(null);
+  const reminderRef = useRef(reminder);
 
   const projects = useMemo(() => {
     const list = [...(config?.projects ?? [])].sort((a, b) => a.order - b.order);
@@ -46,9 +56,12 @@ export function QuickWindow() {
     config?.settings.saveHotkey ?? "Ctrl+Enter",
   );
   const saveOnHide = config?.settings.saveOnHide ?? false;
+  const remindersMode: RemindersMode =
+    config?.settings.remindersMode ?? "both";
 
   textRef.current = text;
   selectedIdRef.current = selected?.id ?? null;
+  reminderRef.current = reminder;
 
   const load = useCallback(async () => {
     const cfg = await api.getConfig();
@@ -61,6 +74,7 @@ export function QuickWindow() {
       null;
     setProjectId(nextProject);
     setText(cfg.draft?.text ?? "");
+    setReminder(emptyReminderDraft(cfg.settings.remindersMode ?? "both"));
   }, []);
 
   useEffect(() => {
@@ -114,8 +128,10 @@ export function QuickWindow() {
       setError(null);
       try {
         if (draftTimer.current) window.clearTimeout(draftTimer.current);
-        await api.saveNote(pid, value);
+        const remInput = reminderDraftToInput(reminderRef.current);
+        await api.saveNote(pid, value, remInput);
         setText("");
+        setReminder(emptyReminderDraft(remindersMode));
         if (flash) {
           setSavedFlash(true);
           window.setTimeout(() => {
@@ -134,7 +150,7 @@ export function QuickWindow() {
         setSaving(false);
       }
     },
-    [hide],
+    [hide, remindersMode],
   );
 
   /** Esc / blur / hide: either auto-save or keep draft. */
@@ -363,6 +379,20 @@ export function QuickWindow() {
                 )}
               </AnimatePresence>
             </div>
+
+            {remindersMode !== "off" && (
+              <div
+                className="border-t border-line/60"
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <ReminderEditor
+                  mode={remindersMode}
+                  value={reminder}
+                  onChange={setReminder}
+                  compact
+                />
+              </div>
+            )}
 
             <div className="flex items-center justify-between border-t border-line/60 px-3 py-2 text-[11px] text-ink-faint">
               <div className="flex gap-3">

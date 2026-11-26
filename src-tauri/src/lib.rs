@@ -4,6 +4,7 @@ mod data_root;
 mod hotkey;
 mod models;
 mod notes;
+mod reminders;
 mod state;
 mod startup;
 mod tray;
@@ -32,7 +33,8 @@ pub fn run() {
 
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init());
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init());
 
     #[cfg(desktop)]
     {
@@ -78,6 +80,8 @@ pub fn run() {
             commands::save_note,
             commands::update_note,
             commands::delete_note,
+            commands::complete_reminder,
+            commands::snooze_reminder,
             commands::save_draft,
             commands::set_last_project,
             commands::get_project_folder_path,
@@ -202,6 +206,8 @@ pub fn run() {
             if cfg.settings.glass_effect {
                 let _ = windows::apply_glass(app.handle(), true);
             }
+
+            reminders::start_reminder_loop(app.handle().clone());
 
             startup::log_line("setup: complete");
             Ok(())

@@ -5,6 +5,7 @@ import type {
   Note,
   Project,
   RelocateDataRootResult,
+  ReminderInput,
   RuntimePaths,
   Settings,
 } from "../types";
@@ -28,12 +29,52 @@ export const api = {
     invoke<Project[]>("reorder_projects", { input: { orderedIds } }),
   listNotes: (projectId?: string | null) =>
     invoke<Note[]>("list_notes", { projectId: projectId ?? null }),
-  saveNote: (projectId: string, text: string) =>
-    invoke<Note>("save_note", { input: { projectId, text } }),
-  updateNote: (projectId: string, noteId: string, text: string) =>
-    invoke<Note>("update_note", { input: { projectId, noteId, text } }),
+  saveNote: (
+    projectId: string,
+    text: string,
+    reminder?: ReminderInput | null,
+    reminderSnapshot?: import("../types").NoteReminder | null,
+  ) =>
+    invoke<Note>("save_note", {
+      input: {
+        projectId,
+        text,
+        reminder: reminder ?? null,
+        reminderSnapshot: reminderSnapshot ?? null,
+      },
+    }),
+  updateNote: (
+    projectId: string,
+    noteId: string,
+    text: string,
+    opts?: { reminder?: ReminderInput | null; setReminder?: boolean },
+  ) =>
+    invoke<Note>("update_note", {
+      input: {
+        projectId,
+        noteId,
+        text,
+        reminder: opts?.reminder ?? null,
+        setReminder: opts?.setReminder ?? false,
+      },
+    }),
   deleteNote: (projectId: string, noteId: string) =>
     invoke<Note>("delete_note", { input: { projectId, noteId } }),
+  completeReminder: (projectId: string, noteId: string) =>
+    invoke<Note>("complete_reminder", { input: { projectId, noteId } }),
+  snoozeReminder: (
+    projectId: string,
+    noteId: string,
+    opts?: { minutes?: number; until?: string },
+  ) =>
+    invoke<Note>("snooze_reminder", {
+      input: {
+        projectId,
+        noteId,
+        minutes: opts?.minutes ?? null,
+        until: opts?.until ?? null,
+      },
+    }),
   saveDraft: (draft: Draft | null) =>
     invoke<void>("save_draft", { draft }),
   setLastProject: (projectId: string | null) =>

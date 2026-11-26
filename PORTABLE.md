@@ -37,7 +37,7 @@ The zip includes a `PORTABLE` marker file next to `QuickNotes.exe`. While that m
 | What | Path |
 |------|------|
 | Config | `<folder>\data\config.json` |
-| Notes (default) | `<folder>\data\notes\<Project>\notes.md` |
+| Notes (default) | `<folder>\data\notes\<Project>\notes.md` (reminders live in the same file as `<!--qn-reminder:…-->` metadata) |
 | Startup log | `<folder>\data\quicknotes.log` |
 | WebView2 profile/cache | `<folder>\data\webview2\` |
 

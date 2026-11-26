@@ -1,9 +1,11 @@
 use crate::config::{save_config, unique_folder_name};
 use crate::models::*;
 use crate::notes::{
-    append_note, ensure_project_dir, project_notes_path, read_project_notes, sanitize_folder_name,
-    write_project_notes,
+    append_note, build_reminder_from_input, ensure_project_dir, project_notes_path,
+    read_project_notes, sanitize_folder_name, snooze_until_from_minutes,
+    snooze_until_tomorrow_morning, write_project_notes,
 };
+use crate::reminders::{apply_snooze, find_note_mut, mark_reminder_done, reminder_kind_allowed};
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -242,11 +244,26 @@ pub fn save_note(
     }
     let mut cfg = state.config.lock();
     let project = find_project(&cfg, &input.project_id)?.clone();
+    let mode = cfg.settings.reminders_mode.clone();
+    let reminder = if let Some(snap) = input.reminder_snapshot {
+        if !reminder_kind_allowed(&mode, &snap.kind) {
+            return Err("Этот тип напоминаний отключён в настройках".into());
+        }
+        Some(snap)
+    } else if let Some(ri) = &input.reminder {
+        if !reminder_kind_allowed(&mode, &ri.kind) {
+            return Err("Этот тип напоминаний отключён в настройках".into());
+        }
+        Some(build_reminder_from_input(ri)?)
+    } else {
+        None
+    };
     let note = append_note(
         &cfg.settings.storage_dir,
         &project.folder_name,
         &project.id,
         text,
+        reminder,
     )?;
     cfg.settings.last_project_id = Some(project.id.clone());
     cfg.draft = None;
@@ -264,6 +281,7 @@ pub fn update_note(
 ) -> Result<Note, String> {
     let cfg = state.config.lock();
     let project = find_project(&cfg, &input.project_id)?;
+    let mode = cfg.settings.reminders_mode.clone();
     let mut notes =
         read_project_notes(&cfg.settings.storage_dir, &project.folder_name, &project.id)?;
     let idx = notes
@@ -271,9 +289,99 @@ pub fn update_note(
         .position(|n| n.id == input.note_id)
         .ok_or_else(|| "Note not found".to_string())?;
     notes[idx].body = input.text.trim_end().to_string();
+    if input.set_reminder {
+        notes[idx].reminder = match &input.reminder {
+            Some(ri) => {
+                if !reminder_kind_allowed(&mode, &ri.kind) {
+                    return Err("Этот тип напоминаний отключён в настройках".into());
+                }
+                // Preserve status/notified when editing due of an existing reminder of same kind.
+                let mut built = build_reminder_from_input(ri)?;
+                if let Some(prev) = &notes[idx].reminder {
+                    if prev.kind == built.kind
+                        && prev.due_at == built.due_at
+                        && prev.relative_days == built.relative_days
+                    {
+                        built.status = prev.status.clone();
+                        built.snooze_until = prev.snooze_until.clone();
+                        built.notified_at = prev.notified_at.clone();
+                    }
+                }
+                Some(built)
+            }
+            None => None,
+        };
+    }
     let updated = notes[idx].clone();
     write_project_notes(&cfg.settings.storage_dir, &project.folder_name, &notes)?;
     let _ = app.emit("notes-changed", project.id.clone());
+    Ok(updated)
+}
+
+#[tauri::command]
+pub fn complete_reminder(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    input: ReminderActionInput,
+) -> Result<Note, String> {
+    let cfg = state.config.lock();
+    let project = find_project(&cfg, &input.project_id)?;
+    let mut notes =
+        read_project_notes(&cfg.settings.storage_dir, &project.folder_name, &project.id)?;
+    {
+        let note = find_note_mut(&mut notes, &input.note_id)?;
+        mark_reminder_done(note)?;
+    }
+    let updated = notes
+        .iter()
+        .find(|n| n.id == input.note_id)
+        .cloned()
+        .ok_or_else(|| "Note not found".to_string())?;
+    write_project_notes(&cfg.settings.storage_dir, &project.folder_name, &notes)?;
+    let _ = app.emit("notes-changed", project.id.clone());
+    let _ = app.emit("reminder-resolved", &input);
+    Ok(updated)
+}
+
+#[tauri::command]
+pub fn snooze_reminder(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    input: SnoozeReminderInput,
+) -> Result<Note, String> {
+    let until = if let Some(u) = &input.until {
+        crate::notes::normalize_local_datetime(u)?
+    } else if let Some(mins) = input.minutes {
+        if mins == 0 {
+            return Err("Укажите длительность отложения".into());
+        }
+        snooze_until_from_minutes(mins)
+    } else {
+        snooze_until_tomorrow_morning()
+    };
+
+    let cfg = state.config.lock();
+    let project = find_project(&cfg, &input.project_id)?;
+    let mut notes =
+        read_project_notes(&cfg.settings.storage_dir, &project.folder_name, &project.id)?;
+    {
+        let note = find_note_mut(&mut notes, &input.note_id)?;
+        apply_snooze(note, until)?;
+    }
+    let updated = notes
+        .iter()
+        .find(|n| n.id == input.note_id)
+        .cloned()
+        .ok_or_else(|| "Note not found".to_string())?;
+    write_project_notes(&cfg.settings.storage_dir, &project.folder_name, &notes)?;
+    let _ = app.emit("notes-changed", project.id.clone());
+    let _ = app.emit(
+        "reminder-resolved",
+        &ReminderActionInput {
+            project_id: input.project_id.clone(),
+            note_id: input.note_id.clone(),
+        },
+    );
     Ok(updated)
 }
 

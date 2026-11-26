@@ -1,5 +1,35 @@
 export type Theme = "dark" | "light" | "system";
 
+export type RemindersMode = "off" | "relative" | "absolute" | "both";
+export type ReminderKind = "relative" | "absolute";
+export type ReminderStatus = "pending" | "done" | "snoozed";
+
+export interface NoteReminder {
+  kind: ReminderKind;
+  /** Local `YYYY-MM-DD HH:mm`. */
+  dueAt: string;
+  relativeDays?: number | null;
+  status: ReminderStatus;
+  snoozeUntil?: string | null;
+  notifiedAt?: string | null;
+}
+
+export interface ReminderInput {
+  kind: ReminderKind;
+  relativeDays?: number | null;
+  /** Local `YYYY-MM-DD HH:mm` or `YYYY-MM-DDTHH:mm`. */
+  absoluteAt?: string | null;
+}
+
+export interface ReminderDueEvent {
+  projectId: string;
+  noteId: string;
+  projectName: string;
+  bodyPreview: string;
+  dueAt: string;
+  kind: ReminderKind;
+}
+
 export interface Settings {
   hotkey: string;
   /** In-window shortcut to save the quick note (default Ctrl+Enter). */
@@ -13,6 +43,10 @@ export interface Settings {
   saveOnHide: boolean;
   glassEffect: boolean;
   lastProjectId: string | null;
+  /** Off / relative only / absolute only / both. */
+  remindersMode: RemindersMode;
+  /** OS toast / tray notifications when a reminder is due. */
+  reminderNotifications: boolean;
 }
 
 /** Where config/notes live (portable folder vs installed AppData). */
@@ -61,6 +95,7 @@ export interface Note {
   projectId: string;
   timestamp: string;
   body: string;
+  reminder?: NoteReminder | null;
 }
 
 export type MainSection = "notes" | "projects" | "settings";

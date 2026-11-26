@@ -48,6 +48,91 @@ pub struct Settings {
     pub save_on_hide: bool,
     pub glass_effect: bool,
     pub last_project_id: Option<String>,
+    /// Which reminder kinds are allowed when creating/editing notes.
+    #[serde(default)]
+    pub reminders_mode: RemindersMode,
+    /// Show OS / tray toast when a reminder is due.
+    #[serde(default = "default_true")]
+    pub reminder_notifications: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// Master switch for reminder kinds available in the UI and due-checker.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum RemindersMode {
+    Off,
+    Relative,
+    Absolute,
+    #[default]
+    Both,
+}
+
+impl RemindersMode {
+    pub fn allows(&self, kind: &ReminderKind) -> bool {
+        match self {
+            RemindersMode::Off => false,
+            RemindersMode::Relative => matches!(kind, ReminderKind::Relative),
+            RemindersMode::Absolute => matches!(kind, ReminderKind::Absolute),
+            RemindersMode::Both => true,
+        }
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        !matches!(self, RemindersMode::Off)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ReminderKind {
+    Relative,
+    Absolute,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum ReminderStatus {
+    #[default]
+    Pending,
+    Done,
+    Snoozed,
+}
+
+/// Reminder attached to a note (persisted in notes.md as an HTML comment).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteReminder {
+    pub kind: ReminderKind,
+    /// Local due time `YYYY-MM-DD HH:mm` (always stored absolute for checking).
+    pub due_at: String,
+    /// Present when kind is Relative — original “in N days” value for UI.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relative_days: Option<u32>,
+    #[serde(default)]
+    pub status: ReminderStatus,
+    /// When status is Snoozed — next fire time `YYYY-MM-DD HH:mm`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snooze_until: Option<String>,
+    /// Set after an OS/in-app notification was shown (avoids spam).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notified_at: Option<String>,
+}
+
+/// Input when creating/updating a reminder from the UI.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReminderInput {
+    pub kind: ReminderKind,
+    /// For Relative: number of days from now (≥ 1).
+    #[serde(default)]
+    pub relative_days: Option<u32>,
+    /// For Absolute: local datetime `YYYY-MM-DD HH:mm` or `YYYY-MM-DDTHH:mm`.
+    #[serde(default)]
+    pub absolute_at: Option<String>,
 }
 
 fn default_save_hotkey() -> String {
@@ -87,6 +172,8 @@ pub struct Note {
     pub project_id: String,
     pub timestamp: String,
     pub body: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reminder: Option<NoteReminder>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -117,6 +204,11 @@ pub struct ReorderProjectsInput {
 pub struct AppendNoteInput {
     pub project_id: String,
     pub text: String,
+    #[serde(default)]
+    pub reminder: Option<ReminderInput>,
+    /// Exact reminder snapshot (e.g. undo delete). Takes precedence over `reminder`.
+    #[serde(default)]
+    pub reminder_snapshot: Option<NoteReminder>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -125,6 +217,46 @@ pub struct UpdateNoteInput {
     pub project_id: String,
     pub note_id: String,
     pub text: String,
+    /// When `Some`, replaces the reminder (`None` inside clears it).
+    /// When field omitted (`None` outer via Option default), leave unchanged —
+    /// use `update_reminder` flag for clarity from the frontend.
+    #[serde(default)]
+    pub reminder: Option<ReminderInput>,
+    /// If true, apply `reminder` (including clearing when None).
+    #[serde(default)]
+    pub set_reminder: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReminderActionInput {
+    pub project_id: String,
+    pub note_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SnoozeReminderInput {
+    pub project_id: String,
+    pub note_id: String,
+    /// Minutes from now (e.g. 15, 60). Ignored if `until` is set.
+    #[serde(default)]
+    pub minutes: Option<u32>,
+    /// Absolute local `YYYY-MM-DD HH:mm`.
+    #[serde(default)]
+    pub until: Option<String>,
+}
+
+/// Payload emitted to the frontend when a reminder fires.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReminderDueEvent {
+    pub project_id: String,
+    pub note_id: String,
+    pub project_name: String,
+    pub body_preview: String,
+    pub due_at: String,
+    pub kind: ReminderKind,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -154,6 +286,8 @@ impl Default for Settings {
             save_on_hide: false,
             glass_effect: true,
             last_project_id: None,
+            reminders_mode: RemindersMode::Both,
+            reminder_notifications: true,
         }
     }
 }
@@ -267,5 +401,7 @@ mod tests {
         let s: Settings = serde_json::from_str(raw).expect("legacy settings parse");
         assert_eq!(s.save_hotkey, "Ctrl+Enter");
         assert!(!s.save_on_hide);
+        assert_eq!(s.reminders_mode, RemindersMode::Both);
+        assert!(s.reminder_notifications);
     }
 }
