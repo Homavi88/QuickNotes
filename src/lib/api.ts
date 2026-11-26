@@ -4,6 +4,7 @@ import type {
   Draft,
   Note,
   Project,
+  RelocateDataRootResult,
   RuntimePaths,
   Settings,
 } from "../types";
@@ -41,6 +42,14 @@ export const api = {
     invoke<string>("get_project_folder_path", { projectId }),
   getStorageDir: () => invoke<string>("get_storage_dir"),
   getRuntimePaths: () => invoke<RuntimePaths>("get_runtime_paths"),
+  relocateDataRoot: (parentPath: string, copyExisting: boolean) =>
+    invoke<RelocateDataRootResult>("relocate_data_root", {
+      input: { parentPath, copyExisting },
+    }),
+  resetDataRoot: (copyBack: boolean) =>
+    invoke<RelocateDataRootResult>("reset_data_root", {
+      input: { copyBack },
+    }),
   showQuickWindow: () => invoke<void>("show_quick_window"),
   hideQuickWindow: () => invoke<void>("hide_quick_window"),
   showMainWindow: (section?: string) =>

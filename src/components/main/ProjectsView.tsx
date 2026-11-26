@@ -1,8 +1,9 @@
 import { Reorder } from "framer-motion";
 import { GripVertical, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { EmojiPicker } from "../EmojiPicker";
 import { useAppStore } from "../../store/useAppStore";
-import { PROJECT_COLORS, PROJECT_EMOJIS, type Project } from "../../types";
+import { PROJECT_COLORS, PROJECT_EMOJI_FAVORITES, type Project } from "../../types";
 
 export function ProjectsView() {
   const { config, createProject, updateProject, deleteProject, reorderProjects } =
@@ -10,7 +11,7 @@ export function ProjectsView() {
   const [items, setItems] = useState<Project[]>([]);
   const [name, setName] = useState("");
   const [color, setColor] = useState<string>(PROJECT_COLORS[0]);
-  const [emoji, setEmoji] = useState<string>(PROJECT_EMOJIS[0]);
+  const [emoji, setEmoji] = useState<string>(PROJECT_EMOJI_FAVORITES[0]);
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
 
   useEffect(() => {
@@ -28,7 +29,7 @@ export function ProjectsView() {
 
       <div className="mb-6 rounded-2xl border border-line bg-surface-elevated p-4">
         <div className="mb-3 text-sm font-medium">Новый проект</div>
-        <div className="flex flex-wrap items-end gap-3">
+        <div className="flex flex-wrap items-start gap-3">
           <label className="flex min-w-[200px] flex-1 flex-col gap-1 text-xs text-ink-muted">
             Название
             <input
@@ -54,23 +55,7 @@ export function ProjectsView() {
               ))}
             </div>
           </div>
-          <div className="flex flex-col gap-1 text-xs text-ink-muted">
-            Эмодзи
-            <div className="flex flex-wrap gap-1">
-              {PROJECT_EMOJIS.map((e) => (
-                <button
-                  key={e}
-                  type="button"
-                  onClick={() => setEmoji(e)}
-                  className={`rounded-lg px-1.5 py-1 text-base ${
-                    emoji === e ? "bg-accent/20" : "hover:bg-surface-muted"
-                  }`}
-                >
-                  {e}
-                </button>
-              ))}
-            </div>
-          </div>
+          <EmojiPicker value={emoji} onChange={setEmoji} />
           <button
             type="button"
             disabled={!name.trim()}
@@ -78,7 +63,7 @@ export function ProjectsView() {
               await createProject(name.trim(), color, emoji);
               setName("");
             }}
-            className="inline-flex items-center gap-2 rounded-xl bg-accent px-4 py-2 text-sm font-medium text-white disabled:opacity-40"
+            className="inline-flex items-center gap-2 self-end rounded-xl bg-accent px-4 py-2 text-sm font-medium text-white disabled:opacity-40"
           >
             <Plus className="h-4 w-4" />
             Добавить
@@ -106,19 +91,13 @@ export function ProjectsView() {
               className="h-3 w-3 rounded-full"
               style={{ background: project.color }}
             />
-            <select
+            <EmojiPicker
+              compact
               value={project.emoji}
-              onChange={(e) =>
-                void updateProject({ id: project.id, emoji: e.target.value })
+              onChange={(next) =>
+                void updateProject({ id: project.id, emoji: next })
               }
-              className="rounded-lg bg-surface-muted px-1 py-1 text-base outline-none"
-            >
-              {PROJECT_EMOJIS.map((e) => (
-                <option key={e} value={e}>
-                  {e}
-                </option>
-              ))}
-            </select>
+            />
             <input
               defaultValue={project.name}
               key={`${project.id}-${project.name}`}

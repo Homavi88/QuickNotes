@@ -21,19 +21,37 @@ pub struct RuntimePaths {
     pub config_dir: String,
     pub config_path: String,
     pub default_storage_dir: String,
+    /// User-chosen parent when data was relocated (`{parent}/QuickNotes/data`).
+    /// `null` when using the built-in default layout.
+    pub data_parent: Option<String>,
+    /// Default parent used when no relocate pointer exists (exe dir or AppData parent).
+    pub default_data_parent: String,
+    /// Effective data folder that will be used for a given pending parent selection preview.
+    pub data_dir_preview_suffix: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
     pub hotkey: String,
+    /// In-window shortcut that saves the quick note (e.g. "Ctrl+Enter", "Enter").
+    #[serde(default = "default_save_hotkey")]
+    pub save_hotkey: String,
     pub autostart: bool,
     pub theme: Theme,
     pub accent_color: String,
     pub storage_dir: String,
     pub hide_on_blur: bool,
+    /// When true, Esc / blur / hide with non-empty text saves to the selected project
+    /// instead of only keeping a draft.
+    #[serde(default)]
+    pub save_on_hide: bool,
     pub glass_effect: bool,
     pub last_project_id: Option<String>,
+}
+
+fn default_save_hotkey() -> String {
+    "Ctrl+Enter".into()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -127,11 +145,13 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             hotkey: "Ctrl+Alt+N".into(),
+            save_hotkey: default_save_hotkey(),
             autostart: false,
             theme: Theme::Dark,
             accent_color: "#7C5CFF".into(),
             storage_dir: default_storage_dir(),
             hide_on_blur: true,
+            save_on_hide: false,
             glass_effect: true,
             last_project_id: None,
         }
@@ -166,8 +186,15 @@ pub fn exe_dir() -> Option<PathBuf> {
         .and_then(|p| p.parent().map(|d| d.to_path_buf()))
 }
 
-/// Portable layout: `<exe_dir>/data/`. Installed layout: `%APPDATA%/QuickNotes`.
+/// Effective config/data directory.
+///
+/// - Relocated: `{data-root pointer}/QuickNotes/data`
+/// - Portable default: `<exe_dir>/data/`
+/// - Installed default: `%APPDATA%/QuickNotes`
 pub fn config_dir() -> PathBuf {
+    if let Some(parent) = crate::data_root::read_data_parent_override() {
+        return crate::data_root::data_dir_for_parent(&parent);
+    }
     if is_portable_mode() {
         return exe_dir()
             .unwrap_or_else(|| PathBuf::from("."))
@@ -200,12 +227,17 @@ pub fn default_storage_dir() -> String {
 
 pub fn runtime_paths() -> RuntimePaths {
     let exe = exe_dir().unwrap_or_else(|| PathBuf::from("."));
+    let default_parent = crate::data_root::default_data_parent();
     RuntimePaths {
         portable: is_portable_mode(),
         exe_dir: exe.to_string_lossy().into_owned(),
         config_dir: config_dir().to_string_lossy().into_owned(),
         config_path: config_path().to_string_lossy().into_owned(),
         default_storage_dir: default_storage_dir(),
+        data_parent: crate::data_root::current_data_parent()
+            .map(|p| p.to_string_lossy().into_owned()),
+        default_data_parent: default_parent.to_string_lossy().into_owned(),
+        data_dir_preview_suffix: "QuickNotes/data".into(),
     }
 }
 
@@ -217,5 +249,23 @@ mod tests {
     fn config_path_ends_with_config_json() {
         let path = config_path();
         assert_eq!(path.file_name().and_then(|s| s.to_str()), Some("config.json"));
+    }
+
+    #[test]
+    fn settings_defaults_new_fields_from_legacy_json() {
+        // r## so "#7C5CFF" does not terminate the raw string early
+        let raw = r##"{
+            "hotkey": "Ctrl+Alt+N",
+            "autostart": false,
+            "theme": "dark",
+            "accentColor": "#7C5CFF",
+            "storageDir": "C:/notes",
+            "hideOnBlur": true,
+            "glassEffect": true,
+            "lastProjectId": null
+        }"##;
+        let s: Settings = serde_json::from_str(raw).expect("legacy settings parse");
+        assert_eq!(s.save_hotkey, "Ctrl+Enter");
+        assert!(!s.save_on_hide);
     }
 }

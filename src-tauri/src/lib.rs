@@ -1,5 +1,6 @@
 mod commands;
 mod config;
+mod data_root;
 mod hotkey;
 mod models;
 mod notes;
@@ -82,6 +83,8 @@ pub fn run() {
             commands::get_project_folder_path,
             commands::get_storage_dir,
             commands::get_runtime_paths,
+            commands::relocate_data_root,
+            commands::reset_data_root,
             commands::show_quick_window,
             commands::hide_quick_window,
             commands::show_main_window,

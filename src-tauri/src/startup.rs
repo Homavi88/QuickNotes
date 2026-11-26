@@ -61,6 +61,10 @@ pub fn init_logging() -> PathBuf {
                 log_line(&format!("exe={}", exe.display()));
             }
             log_line(&format!("portable={}", is_portable_mode()));
+            log_line(&format!("config_dir={}", config_dir().display()));
+            if let Some(parent) = crate::data_root::current_data_parent() {
+                log_line(&format!("data_parent={}", parent.display()));
+            }
             return path.clone();
         }
     }

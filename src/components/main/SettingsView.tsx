@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 import {
@@ -7,27 +7,68 @@ import {
   isEnabled as isAutostartEnabled,
 } from "@tauri-apps/plugin-autostart";
 import { invoke } from "@tauri-apps/api/core";
+import { api } from "../../lib/api";
+import { eventKeyToken, isModifierOnlyKey } from "../../lib/hotkey";
 import { useAppStore } from "../../store/useAppStore";
 import type { RuntimePaths, Settings, Theme } from "../../types";
 import { PROJECT_COLORS } from "../../types";
 
+const SAVE_HOTKEY_PRESETS = ["Ctrl+Enter", "Enter", "Ctrl+S"] as const;
+
+function joinDataDir(parent: string, suffix: string): string {
+  const sep = parent.includes("\\") && !parent.includes("/") ? "\\" : "/";
+  const clean = parent.replace(/[\\/]+$/, "");
+  return `${clean}${sep}${suffix.replace(/\//g, sep)}`;
+}
+
 export function SettingsView() {
-  const { config, updateSettings } = useAppStore();
+  const { config, updateSettings, applyConfig } = useAppStore();
   const [local, setLocal] = useState<Settings | null>(null);
-  const [recording, setRecording] = useState(false);
+  const [recording, setRecording] = useState<"global" | "save" | null>(null);
   const [hotkeyError, setHotkeyError] = useState<string | null>(null);
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
   const [runtimePaths, setRuntimePaths] = useState<RuntimePaths | null>(null);
+  /** Pending chosen parent for app data (`…/QuickNotes/data`). null = no pending change. */
+  const [pendingDataParent, setPendingDataParent] = useState<string | null>(null);
+  const [pendingResetDefault, setPendingResetDefault] = useState(false);
 
   useEffect(() => {
-    if (config) setLocal({ ...config.settings });
+    if (config) {
+      setLocal({
+        ...config.settings,
+        saveHotkey: config.settings.saveHotkey || "Ctrl+Enter",
+        saveOnHide: config.settings.saveOnHide ?? false,
+      });
+    }
   }, [config]);
 
+  const refreshPaths = async () => {
+    try {
+      setRuntimePaths(await api.getRuntimePaths());
+    } catch {
+      setRuntimePaths(null);
+    }
+  };
+
   useEffect(() => {
-    void invoke<RuntimePaths>("get_runtime_paths")
-      .then(setRuntimePaths)
-      .catch(() => setRuntimePaths(null));
+    void refreshPaths();
   }, []);
+
+  const previewDataDir = useMemo(() => {
+    if (!runtimePaths) return null;
+    if (pendingResetDefault) {
+      return runtimePaths.portable
+        ? joinDataDir(runtimePaths.exeDir, "data")
+        : runtimePaths.configDir; // will be AppData after reset; show default parent/data for portable
+    }
+    if (pendingDataParent) {
+      return joinDataDir(
+        pendingDataParent,
+        runtimePaths.dataDirPreviewSuffix || "QuickNotes/data",
+      );
+    }
+    return runtimePaths.configDir;
+  }, [runtimePaths, pendingDataParent, pendingResetDefault]);
 
   if (!local) return null;
 
@@ -38,10 +79,61 @@ export function SettingsView() {
     setHotkeyError(null);
     setSavedMsg(null);
     try {
-      await invoke("reregister_hotkey", { hotkey: local.hotkey });
-      if (local.autostart) await enableAutostart();
+      const dataChanging =
+        pendingResetDefault ||
+        (pendingDataParent !== null &&
+          pendingDataParent !== (runtimePaths?.dataParent ?? ""));
+
+      if (dataChanging && runtimePaths) {
+        if (pendingResetDefault) {
+          const doReset = window.confirm(
+            "Сбросить папку данных на расположение по умолчанию?\n" +
+              "(Портативный: рядом с exe\\data. Установленный: AppData.)\n" +
+              "Старые файлы не удаляются.",
+          );
+          if (doReset) {
+            const copy = window.confirm(
+              "Скопировать текущие данные в папку по умолчанию?\n\nOK — копировать.\nОтмена — без копирования.",
+            );
+            const result = await api.resetDataRoot(copy);
+            applyConfig(result.config);
+            setRuntimePaths(result.paths);
+          }
+        } else if (pendingDataParent) {
+          const target = joinDataDir(
+            pendingDataParent,
+            runtimePaths.dataDirPreviewSuffix || "QuickNotes/data",
+          );
+          const doMove = window.confirm(
+            `Данные будут в:\n${target}\n\nПродолжить? Старая папка не удаляется.`,
+          );
+          if (doMove) {
+            const copy = window.confirm(
+              "Скопировать существующие config и заметки в новое место?\n\nOK — копировать.\nОтмена — создать пустую папку данных.",
+            );
+            const result = await api.relocateDataRoot(pendingDataParent, copy);
+            applyConfig(result.config);
+            setRuntimePaths(result.paths);
+          }
+        }
+        setPendingDataParent(null);
+        setPendingResetDefault(false);
+      }
+
+      const latest = useAppStore.getState().config?.settings;
+      const merged = latest
+        ? {
+            ...local,
+            storageDir: latest.storageDir,
+            lastProjectId: latest.lastProjectId,
+          }
+        : local;
+
+      await invoke("reregister_hotkey", { hotkey: merged.hotkey });
+      if (merged.autostart) await enableAutostart();
       else await disableAutostart();
-      await updateSettings(local);
+      await updateSettings(merged);
+      await refreshPaths();
       setSavedMsg("Сохранено");
       window.setTimeout(() => setSavedMsg(null), 1500);
     } catch (e) {
@@ -54,7 +146,7 @@ export function SettingsView() {
       <div className="mb-6">
         <h2 className="text-xl font-semibold">Настройки</h2>
         <p className="text-sm text-ink-muted">
-          Хоткей, автозапуск, тема и хранение заметок.
+          Хоткеи, автосохранение, тема и хранение заметок.
         </p>
       </div>
 
@@ -62,23 +154,99 @@ export function SettingsView() {
         <Field label="Глобальный хоткей">
           <button
             type="button"
-            onClick={() => setRecording(true)}
+            onClick={() => setRecording("global")}
             className="rounded-xl border border-line bg-surface-muted px-3 py-2 text-sm"
           >
-            {recording ? "Нажмите сочетание…" : local.hotkey}
+            {recording === "global" ? "Нажмите сочетание…" : local.hotkey}
           </button>
-          {recording && (
+          {recording === "global" && (
             <HotkeyRecorder
-              onCancel={() => setRecording(false)}
+              allowBareKey={false}
+              onCancel={() => setRecording(null)}
               onRecord={(hotkey) => {
                 patch({ hotkey });
-                setRecording(false);
+                setRecording(null);
               }}
             />
           )}
           {hotkeyError && (
             <div className="mt-1 text-xs text-rose-400">{hotkeyError}</div>
           )}
+          <p className="mt-2 text-xs text-ink-muted">
+            Показывает окно быстрого ввода из любого приложения.
+          </p>
+        </Field>
+
+        <Field label="Хоткей сохранения (быстрый ввод)">
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setRecording("save")}
+              className="rounded-xl border border-line bg-surface-muted px-3 py-2 text-sm"
+            >
+              {recording === "save" ? "Нажмите сочетание…" : local.saveHotkey}
+            </button>
+            {SAVE_HOTKEY_PRESETS.map((preset) => (
+              <button
+                key={preset}
+                type="button"
+                onClick={() => patch({ saveHotkey: preset })}
+                className={`rounded-xl px-3 py-2 text-sm ${
+                  local.saveHotkey === preset
+                    ? "bg-accent text-white"
+                    : "border border-line bg-surface-muted"
+                }`}
+              >
+                {preset}
+              </button>
+            ))}
+          </div>
+          {recording === "save" && (
+            <HotkeyRecorder
+              allowBareKey
+              onCancel={() => setRecording(null)}
+              onRecord={(hotkey) => {
+                patch({ saveHotkey: hotkey });
+                setRecording(null);
+              }}
+            />
+          )}
+          <p className="mt-2 text-xs text-ink-muted">
+            По умолчанию Ctrl+Enter. Можно назначить Enter или своё сочетание.
+            Esc по-прежнему закрывает окно.
+          </p>
+        </Field>
+
+        <Toggle
+          label="Сохранять при закрытии / скрытии окна"
+          checked={local.saveOnHide}
+          onChange={(saveOnHide) => patch({ saveOnHide })}
+        />
+        <p className="-mt-3 px-1 text-xs text-ink-muted">
+          Если включено: Esc, потеря фокуса или скрытие окна с непустым текстом
+          сохраняют заметку в выбранный проект (вместо черновика). Если
+          выключено — как раньше: текст остаётся черновиком.
+        </p>
+
+        <Field label="Горячие клавиши быстрого ввода">
+          <ul className="space-y-1.5 text-sm text-ink-muted">
+            <HotkeyHint keys={local.saveHotkey} desc="Сохранить заметку" />
+            <HotkeyHint
+              keys="Esc"
+              desc={
+                local.saveOnHide
+                  ? "Сохранить (если есть текст) и закрыть"
+                  : "Закрыть (черновик сохраняется)"
+              }
+            />
+            <HotkeyHint keys="Ctrl+1…9" desc="Выбрать проект по номеру" />
+            <HotkeyHint keys="Ctrl+↑ / Ctrl+↓" desc="Переключить проект" />
+            <HotkeyHint keys="Ctrl+P" desc="Список проектов с поиском" />
+            <HotkeyHint
+              keys={local.hotkey}
+              desc="Глобальный вызов окна (из любой программы)"
+            />
+          </ul>
         </Field>
 
         <Toggle
@@ -92,27 +260,71 @@ export function SettingsView() {
         </p>
 
         {runtimePaths && (
-          <Field label={runtimePaths.portable ? "Портативный режим" : "Хранение данных"}>
-            <div className="space-y-1 text-xs text-ink-muted">
-              {runtimePaths.portable ? (
-                <p>
-                  Рядом с exe найден маркер PORTABLE. Конфиг и заметки по
-                  умолчанию пишутся в папку{" "}
-                  <code className="text-ink">{runtimePaths.configDir}</code>{" "}
-                  (без Program Files / без прав администратора).
-                </p>
-              ) : (
-                <p>
-                  Конфиг:{" "}
-                  <code className="text-ink">{runtimePaths.configPath}</code>
-                  . Заметки по умолчанию:{" "}
-                  <code className="text-ink">
-                    {runtimePaths.defaultStorageDir}
-                  </code>
-                  .
-                </p>
+          <Field label="Папка данных приложения">
+            <p className="mb-2 text-xs text-ink-muted">
+              {runtimePaths.portable
+                ? "Портативный режим (маркер PORTABLE). Exe остаётся на месте — переносится только папка data."
+                : "Установленная сборка. Можно вынести config и заметки в другую папку."}{" "}
+              Выбранный каталог получит{" "}
+              <code className="text-ink">QuickNotes/data/</code> внутри.
+            </p>
+            <div className="mb-2 text-xs text-ink-muted">
+              Сейчас:{" "}
+              <code className="break-all text-ink">{runtimePaths.configDir}</code>
+            </div>
+            {previewDataDir &&
+              previewDataDir !== runtimePaths.configDir && (
+                <div className="mb-2 text-xs text-amber-400">
+                  После сохранения:{" "}
+                  <code className="break-all">{previewDataDir}</code>
+                </div>
+              )}
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="rounded-xl border border-line px-3 py-2 text-sm hover:bg-surface-muted"
+                onClick={async () => {
+                  const dir = await open({
+                    directory: true,
+                    multiple: false,
+                    defaultPath:
+                      pendingDataParent ??
+                      runtimePaths.dataParent ??
+                      runtimePaths.defaultDataParent,
+                  });
+                  if (typeof dir === "string") {
+                    setPendingDataParent(dir);
+                    setPendingResetDefault(false);
+                  }
+                }}
+              >
+                Выбрать…
+              </button>
+              <button
+                type="button"
+                className="rounded-xl border border-line px-3 py-2 text-sm hover:bg-surface-muted"
+                onClick={() => void openPath(runtimePaths.configDir)}
+              >
+                Открыть текущую
+              </button>
+              {(runtimePaths.dataParent || pendingDataParent) && (
+                <button
+                  type="button"
+                  className="rounded-xl border border-line px-3 py-2 text-sm hover:bg-surface-muted"
+                  onClick={() => {
+                    setPendingDataParent(null);
+                    setPendingResetDefault(true);
+                  }}
+                >
+                  По умолчанию
+                </button>
               )}
             </div>
+            <p className="mt-2 text-xs text-ink-faint">
+              Указатель пути пишется в{" "}
+              <code className="text-ink">data-root.txt</code> рядом с exe (и в
+              AppData). После переноса лучше перезапустить приложение.
+            </p>
           </Field>
         )}
 
@@ -222,6 +434,17 @@ export function SettingsView() {
   );
 }
 
+function HotkeyHint({ keys, desc }: { keys: string; desc: string }) {
+  return (
+    <li className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+      <kbd className="rounded bg-surface-muted px-1.5 py-0.5 font-mono text-xs text-ink">
+        {keys}
+      </kbd>
+      <span>{desc}</span>
+    </li>
+  );
+}
+
 function Field({
   label,
   children,
@@ -262,9 +485,12 @@ function Toggle({
 function HotkeyRecorder({
   onRecord,
   onCancel,
+  allowBareKey,
 }: {
   onRecord: (hotkey: string) => void;
   onCancel: () => void;
+  /** Allow a key without Ctrl/Alt/Shift (e.g. Enter alone for save). */
+  allowBareKey?: boolean;
 }) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -274,41 +500,29 @@ function HotkeyRecorder({
         onCancel();
         return;
       }
+      if (isModifierOnlyKey(e)) return;
       const parts: string[] = [];
       if (e.ctrlKey || e.metaKey) parts.push("Ctrl");
       if (e.altKey) parts.push("Alt");
       if (e.shiftKey) parts.push("Shift");
-      const key = normalizeKey(e);
+      const key = eventKeyToken(e);
       if (!key) return;
-      if (["Control", "Alt", "Shift", "Meta"].includes(e.key)) return;
+      if (!allowBareKey && parts.length === 0) return;
+      // Never bind Esc as a save/global hotkey via recorder.
+      if (key === "Esc") return;
       parts.push(key);
       onRecord(parts.join("+"));
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [onRecord, onCancel]);
+  }, [onRecord, onCancel, allowBareKey]);
 
   return (
-    <div className="mt-2 text-xs text-ink-muted">Ожидание… Esc — отмена</div>
+    <div className="mt-2 text-xs text-ink-muted">
+      Ожидание… Esc — отмена
+      {allowBareKey ? " · можно без модификаторов (например Enter)" : ""}
+    </div>
   );
-}
-
-function normalizeKey(e: KeyboardEvent): string | null {
-  if (e.code.startsWith("Key") && e.code.length === 4) return e.code.slice(3);
-  if (e.code.startsWith("Digit")) return e.code.slice(5);
-  const map: Record<string, string> = {
-    Space: "Space",
-    Enter: "Enter",
-    Tab: "Tab",
-    ArrowUp: "Up",
-    ArrowDown: "Down",
-    ArrowLeft: "Left",
-    ArrowRight: "Right",
-    Escape: "Esc",
-  };
-  if (map[e.code]) return map[e.code];
-  if (e.key.length === 1) return e.key.toUpperCase();
-  return null;
 }
 
 function AutostartHint() {
