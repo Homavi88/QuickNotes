@@ -338,6 +338,11 @@ pub fn get_storage_dir(state: State<'_, AppState>) -> Result<String, String> {
 }
 
 #[tauri::command]
+pub fn get_runtime_paths() -> Result<RuntimePaths, String> {
+    Ok(runtime_paths())
+}
+
+#[tauri::command]
 pub async fn show_quick_window(app: AppHandle) -> Result<(), String> {
     crate::windows::show_quick(&app)
 }
