@@ -20,6 +20,9 @@ pub fn run() {
     // File log first — release builds have no console on Windows.
     startup::init_logging();
 
+    // Portable Fixed Runtime: set WEBVIEW2_BROWSER_EXECUTABLE_FOLDER before any webview.
+    let _ = startup::prepare_fixed_webview2();
+
     // Missing WebView2 = invisible exit unless we stop here with a MessageBox.
     if !startup::ensure_webview2_or_explain() {
         startup::log_line("Exiting: WebView2 Runtime missing");
@@ -146,8 +149,8 @@ pub fn run() {
                         "QuickNotes — window error",
                         &format!(
                             "Failed to create app windows (WebView2 may be missing or blocked).\n\n{e}\n\n\
-                             Install WebView2 Runtime:\n\
-                             https://developer.microsoft.com/microsoft-edge/webview2/\n\n\
+                             Portable: confirm WebView2\\ sits next to QuickNotes.exe.\n\
+                             Do not run from a UNC/network path. Prefer a local disk folder.\n\
                              See data\\quicknotes.log next to the exe for details."
                         ),
                     );
@@ -207,8 +210,8 @@ pub fn run() {
             "QuickNotes — failed to start",
             &format!(
                 "The application could not start.\n\n{e}\n\n\
-                 If WebView2 is missing, install it from:\n\
-                 https://developer.microsoft.com/microsoft-edge/webview2/\n\n\
+                 Portable builds need WebView2\\ next to QuickNotes.exe \
+                 (no separate Runtime installer).\n\n\
                  Check quicknotes.log beside the exe (or under data\\)."
             ),
         );

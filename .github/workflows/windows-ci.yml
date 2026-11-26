@@ -42,7 +42,7 @@ jobs:
         # Also produces src-tauri/target/release/QuickNotes.exe for the portable zip.
         run: npm run tauri build -- --bundles msi,nsis
 
-      - name: Package portable zip
+      - name: Package portable zip (with Fixed WebView2 Runtime)
         shell: pwsh
         run: pwsh -File scripts/package-portable.ps1
 
@@ -56,12 +56,12 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      # Zip only — staging folder includes ~hundreds of MB Fixed Runtime binaries.
       - name: Upload portable zip
         uses: actions/upload-artifact@v4
         with:
           name: QuickNotes-windows-portable
-          path: |
-            QuickNotes-v*-portable.zip
-            QuickNotes-portable/
+          path: QuickNotes-v*-portable.zip
           if-no-files-found: error
           retention-days: 14
+          compression-level: 0

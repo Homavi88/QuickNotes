@@ -66,16 +66,14 @@ jobs:
 
             **Installers:** `.msi` and NSIS `.exe` (unsigned MVP — Windows SmartScreen may show a warning; choose More info → Run anyway if prompted).
 
-            **Portable (no install):** download `QuickNotes-*-portable.zip`, unzip anywhere, run `QuickNotes.exe`. See `PORTABLE.md` inside the zip. Autostart in Settings registers the portable exe path (no MSI).
-
-            The portable zip includes the WebView2 Evergreen Bootstrapper. If the Runtime is missing, QuickNotes shows a dialog (and writes `data/quicknotes.log`) instead of exiting silently.
+            **Portable (true no-install):** download `QuickNotes-*-portable.zip`, unzip to a local folder, run `QuickNotes.exe` only. Bundles Microsoft WebView2 Fixed Version Runtime under `WebView2\` — no Runtime MSI/setup, no admin. See `PORTABLE.md`. Zip is large on purpose (~200–400+ MB).
 
             Built from commit `${{ github.sha }}`.
           releaseDraft: false
           prerelease: false
           args: --bundles msi,nsis
 
-      - name: Package portable zip
+      - name: Package portable zip (with Fixed WebView2 Runtime)
         shell: pwsh
         run: pwsh -File scripts/package-portable.ps1
 

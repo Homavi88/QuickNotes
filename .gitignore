@@ -15,6 +15,7 @@ dist-ssr
 # Portable packaging outputs (produced by scripts/package-portable.ps1 / CI)
 QuickNotes-portable/
 QuickNotes-v*-portable.zip
+.webview2-fixed-runtime/
 
 # Editor directories and files
 .vscode/*
