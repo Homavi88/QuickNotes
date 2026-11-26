@@ -10,7 +10,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { api } from "../../lib/api";
 import { eventKeyToken, isModifierOnlyKey } from "../../lib/hotkey";
 import { useAppStore } from "../../store/useAppStore";
-import type { RuntimePaths, Settings, Theme } from "../../types";
+import type {
+  RemindersMode,
+  RuntimePaths,
+  Settings,
+  Theme,
+} from "../../types";
 import { PROJECT_COLORS } from "../../types";
 
 const SAVE_HOTKEY_PRESETS = ["Ctrl+Enter", "Enter", "Ctrl+S"] as const;
@@ -38,6 +43,8 @@ export function SettingsView() {
         ...config.settings,
         saveHotkey: config.settings.saveHotkey || "Ctrl+Enter",
         saveOnHide: config.settings.saveOnHide ?? false,
+        remindersMode: config.settings.remindersMode ?? "both",
+        reminderNotifications: config.settings.reminderNotifications ?? true,
       });
     }
   }, [config]);
@@ -226,6 +233,49 @@ export function SettingsView() {
           Если включено: Esc, потеря фокуса или скрытие окна с непустым текстом
           сохраняют заметку в выбранный проект (вместо черновика). Если
           выключено — как раньше: текст остаётся черновиком.
+        </p>
+
+        <Field label="Напоминания">
+          <div className="flex flex-wrap gap-2">
+            {(
+              [
+                ["off", "Выкл"],
+                ["relative", "Только относительные"],
+                ["absolute", "Только дата/время"],
+                ["both", "Все"],
+              ] as [RemindersMode, string][]
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => patch({ remindersMode: value })}
+                className={`rounded-xl px-3 py-2 text-sm ${
+                  local.remindersMode === value
+                    ? "bg-accent text-white"
+                    : "border border-line bg-surface-muted"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <p className="mt-2 text-xs text-ink-muted">
+            Относительные — «через N дней». Абсолютные — конкретная дата и
+            время. Режим ограничивает UI и срабатывание уже сохранённых
+            напоминаний.
+          </p>
+        </Field>
+
+        <Toggle
+          label="Системные уведомления (tray / toast)"
+          checked={local.reminderNotifications}
+          onChange={(reminderNotifications) =>
+            patch({ reminderNotifications })
+          }
+        />
+        <p className="-mt-3 px-1 text-xs text-ink-muted">
+          При наступлении срока показывать OS-уведомление. В главном окне всё
+          равно появится баннер с «Готово» / «Отложить».
         </p>
 
         <Field label="Горячие клавиши быстрого ввода">

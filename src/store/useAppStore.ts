@@ -31,7 +31,19 @@ interface AppState {
   reorderProjects: (orderedIds: string[]) => Promise<void>;
   deleteNoteWithUndo: (note: Note) => Promise<void>;
   undoDelete: () => Promise<void>;
-  updateNote: (note: Note, text: string) => Promise<void>;
+  updateNote: (
+    note: Note,
+    text: string,
+    opts?: {
+      reminder?: import("../types").ReminderInput | null;
+      setReminder?: boolean;
+    },
+  ) => Promise<void>;
+  completeReminder: (note: Note) => Promise<void>;
+  snoozeReminder: (
+    note: Note,
+    opts?: { minutes?: number; until?: string },
+  ) => Promise<void>;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -130,13 +142,29 @@ export const useAppStore = create<AppState>((set, get) => ({
     const undo = get().undo;
     if (!undo) return;
     window.clearTimeout(undo.timer);
-    await api.saveNote(undo.note.projectId, undo.note.body);
+    const rem = undo.note.reminder;
+    await api.saveNote(
+      undo.note.projectId,
+      undo.note.body,
+      null,
+      rem && rem.status !== "done" ? rem : null,
+    );
     set({ undo: null });
     await get().refreshNotes();
   },
 
-  updateNote: async (note, text) => {
-    await api.updateNote(note.projectId, note.id, text);
+  updateNote: async (note, text, opts) => {
+    await api.updateNote(note.projectId, note.id, text, opts);
+    await get().refreshNotes();
+  },
+
+  completeReminder: async (note) => {
+    await api.completeReminder(note.projectId, note.id);
+    await get().refreshNotes();
+  },
+
+  snoozeReminder: async (note, opts) => {
+    await api.snoozeReminder(note.projectId, note.id, opts);
     await get().refreshNotes();
   },
 }));

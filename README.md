@@ -9,10 +9,10 @@
 Ready-to-run builds (no Node or Rust required):
 
 - **[Latest release](https://github.com/Homavi88/QuickNotes/releases/latest)** — Assets include installers and a portable zip
-- **Portable (no installer / corporate PCs):** [QuickNotes-v0.1.6-portable.zip](https://github.com/Homavi88/QuickNotes/releases/latest/download/QuickNotes-v0.1.6-portable.zip) — unzip anywhere, run `QuickNotes.exe` only. Bundles Fixed Version WebView2 (no Runtime setup). See [PORTABLE.md](./PORTABLE.md).
+- **Portable (no installer / corporate PCs):** [QuickNotes-v0.1.7-portable.zip](https://github.com/Homavi88/QuickNotes/releases/latest/download/QuickNotes-v0.1.7-portable.zip) — unzip anywhere, run `QuickNotes.exe` only. Bundles Fixed Version WebView2 (no Runtime setup). See [PORTABLE.md](./PORTABLE.md).
 - Installers:
-  - [QuickNotes_0.1.6_x64_en-US.msi](https://github.com/Homavi88/QuickNotes/releases/latest/download/QuickNotes_0.1.6_x64_en-US.msi)
-  - [QuickNotes_0.1.6_x64-setup.exe](https://github.com/Homavi88/QuickNotes/releases/latest/download/QuickNotes_0.1.6_x64-setup.exe)
+  - [QuickNotes_0.1.7_x64_en-US.msi](https://github.com/Homavi88/QuickNotes/releases/latest/download/QuickNotes_0.1.7_x64_en-US.msi)
+  - [QuickNotes_0.1.7_x64-setup.exe](https://github.com/Homavi88/QuickNotes/releases/latest/download/QuickNotes_0.1.7_x64-setup.exe)
 
 These are **unsigned** MVP builds. Windows SmartScreen may warn; choose **More info → Run anyway** if prompted. Code signing can be added later via CI secrets.
 
@@ -165,10 +165,29 @@ CI uploads installers + the portable zip as workflow artifacts on `main` / PRs (
 
 ```markdown
 ## 2026-11-26 05:52
+<!--qn-reminder:{"kind":"relative","dueAt":"2026-11-28 14:30","relativeDays":2,"status":"pending"}-->
 Текст заметки, может быть многострочным.
+```
 
 - Кодировка UTF-8 (без BOM), переводы строк `\n`
-- Если текст заметки сам содержит строки, начинающиеся с `## YYYY-MM-DD HH:mm`, их нужно экранировать при записи, чтобы парсер не принял их за новую заметку (придумай и опиши способ, например, добавление нулевой ширины пробела или обратного слеша), и корректно разэкранировать при чтении
+- Если текст заметки сам содержит строки, начинающиеся с `## YYYY-MM-DD HH:mm`, их нужно экранировать при записи (нулевой ширины пробел U+200B) и корректно разэкранировать при чтении
+
+#### Напоминания (v0.1.7+)
+
+Опциональная строка сразу под заголовком — HTML-комментарий `<!--qn-reminder:…-->` с JSON:
+
+| Поле | Описание |
+|---|---|
+| `kind` | `relative` (через N дней) или `absolute` (дата/время) |
+| `dueAt` | Локальное время срабатывания `YYYY-MM-DD HH:mm` |
+| `relativeDays` | Исходное N для relative (для UI) |
+| `status` | `pending` / `snoozed` / `done` |
+| `snoozeUntil` | При `snoozed` — следующая проверка |
+| `notifiedAt` | Когда уже показали уведомление (антиспам) |
+
+Комментарий не попадает в текст заметки в UI. Старые `notes.md` без строки читаются как раньше. Sidecar не используется — напоминание хранится в том же `notes.md`.
+
+Настройки: `remindersMode` (`off` | `relative` | `absolute` | `both`), `reminderNotifications` (bool). Фоновый опрос ~30 с; при due — OS toast (если включено) + баннер в главном окне (Готово / +15 мин / +1 час / завтра 09:00).
 
 ### 6.2. Конфигурация
 
@@ -185,7 +204,9 @@ CI uploads installers + the portable zip as workflow artifacts on `main` / PRs (
     "storageDir": "C:\\Users\\User\\QuickNotes",
     "hideOnBlur": true,
     "glassEffect": true,
-    "lastProjectId": null
+    "lastProjectId": null,
+    "remindersMode": "both",
+    "reminderNotifications": true
   },
   "projects": [
     {

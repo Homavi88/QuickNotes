@@ -20,7 +20,7 @@ pub fn create_windows(app: &AppHandle) -> Result<(), String> {
         let builder =
             WebviewWindowBuilder::new(app, "quick", WebviewUrl::App("index.html".into()))
                 .title("QuickNotes Capture")
-                .inner_size(520.0, 260.0)
+                .inner_size(520.0, 320.0)
                 .resizable(false)
                 .decorations(false)
                 .transparent(true)

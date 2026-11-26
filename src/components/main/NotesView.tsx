@@ -1,10 +1,16 @@
-import { Copy, ExternalLink, Pencil, Trash2 } from "lucide-react";
+import { Bell, Copy, ExternalLink, Pencil, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { openPath } from "@tauri-apps/plugin-opener";
+import {
+  ReminderEditor,
+  draftFromNoteReminder,
+  reminderDraftToInput,
+  type ReminderDraft,
+} from "../ReminderEditor";
 import { api } from "../../lib/api";
 import { groupNotesByDay, highlightText } from "../../lib/notesUi";
 import { useAppStore } from "../../store/useAppStore";
-import type { Note, Project } from "../../types";
+import type { Note, Project, RemindersMode } from "../../types";
 
 export function NotesView() {
   const {
@@ -20,7 +26,12 @@ export function NotesView() {
     undo,
     undoDelete,
     updateNote,
+    completeReminder,
+    snoozeReminder,
   } = useAppStore();
+
+  const remindersMode: RemindersMode =
+    config?.settings.remindersMode ?? "both";
 
   const projects = useMemo(
     () => [...(config?.projects ?? [])].sort((a, b) => a.order - b.order),
@@ -116,8 +127,18 @@ export function NotesView() {
                     note={note}
                     project={projects.find((p) => p.id === note.projectId)}
                     query={searchQuery}
+                    remindersMode={remindersMode}
                     onDelete={() => void deleteNoteWithUndo(note)}
-                    onSave={(text) => void updateNote(note, text)}
+                    onSave={(text, remDraft) =>
+                      void updateNote(note, text, {
+                        setReminder: true,
+                        reminder: reminderDraftToInput(remDraft),
+                      })
+                    }
+                    onComplete={() => void completeReminder(note)}
+                    onSnooze={(minutes) =>
+                      void snoozeReminder(note, { minutes })
+                    }
                   />
                 ))}
               </div>
@@ -183,18 +204,37 @@ function NoteCard({
   note,
   project,
   query,
+  remindersMode,
   onDelete,
   onSave,
+  onComplete,
+  onSnooze,
 }: {
   note: Note;
   project?: Project;
   query: string;
+  remindersMode: RemindersMode;
   onDelete: () => void;
-  onSave: (text: string) => void;
+  onSave: (text: string, reminder: ReminderDraft) => void;
+  onComplete: () => void;
+  onSnooze: (minutes?: number) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(note.body);
+  const [remDraft, setRemDraft] = useState<ReminderDraft>(() =>
+    draftFromNoteReminder(remindersMode, note.reminder),
+  );
   const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const rem = note.reminder;
+  const remActive =
+    rem && rem.status !== "done"
+      ? rem.status === "snoozed"
+        ? `Отложено до ${rem.snoozeUntil ?? rem.dueAt}`
+        : rem.notifiedAt
+          ? `Просрочено · ${rem.dueAt}`
+          : `Напоминание · ${rem.dueAt}`
+      : null;
 
   return (
     <article className="rounded-2xl border border-line bg-surface-elevated p-4">
@@ -212,6 +252,15 @@ function NoteCard({
           </>
         )}
         <span>{note.timestamp}</span>
+        {remActive && (
+          <>
+            <span>·</span>
+            <span className="inline-flex items-center gap-1 text-amber-400">
+              <Bell className="h-3 w-3" />
+              {remActive}
+            </span>
+          </>
+        )}
         <div className="ml-auto flex items-center gap-1">
           <IconBtn
             title="Копировать"
@@ -223,6 +272,7 @@ function NoteCard({
             title="Редактировать"
             onClick={() => {
               setDraft(note.body);
+              setRemDraft(draftFromNoteReminder(remindersMode, note.reminder));
               setEditing(true);
             }}
           >
@@ -244,6 +294,13 @@ function NoteCard({
             onChange={(e) => setDraft(e.target.value)}
             className="min-h-24 w-full resize-y rounded-xl border border-line bg-surface-muted p-3 text-sm outline-none"
           />
+          <div className="mt-2">
+            <ReminderEditor
+              mode={remindersMode}
+              value={remDraft}
+              onChange={setRemDraft}
+            />
+          </div>
           <div className="mt-2 flex justify-end gap-2">
             <button
               type="button"
@@ -256,7 +313,7 @@ function NoteCard({
               type="button"
               className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white"
               onClick={() => {
-                onSave(draft);
+                onSave(draft, remDraft);
                 setEditing(false);
               }}
             >
@@ -265,12 +322,46 @@ function NoteCard({
           </div>
         </div>
       ) : (
-        <div
-          className="whitespace-pre-wrap text-sm leading-relaxed text-ink"
-          dangerouslySetInnerHTML={{
-            __html: highlightText(note.body, query),
-          }}
-        />
+        <>
+          <div
+            className="whitespace-pre-wrap text-sm leading-relaxed text-ink"
+            dangerouslySetInnerHTML={{
+              __html: highlightText(note.body, query),
+            }}
+          />
+          {rem && rem.status !== "done" && rem.notifiedAt && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="rounded-lg bg-emerald-500/90 px-2.5 py-1 text-xs text-white"
+                onClick={onComplete}
+              >
+                Готово
+              </button>
+              <button
+                type="button"
+                className="rounded-lg border border-line px-2.5 py-1 text-xs text-ink-muted hover:bg-surface-muted"
+                onClick={() => onSnooze(15)}
+              >
+                +15 мин
+              </button>
+              <button
+                type="button"
+                className="rounded-lg border border-line px-2.5 py-1 text-xs text-ink-muted hover:bg-surface-muted"
+                onClick={() => onSnooze(60)}
+              >
+                +1 час
+              </button>
+              <button
+                type="button"
+                className="rounded-lg border border-line px-2.5 py-1 text-xs text-ink-muted hover:bg-surface-muted"
+                onClick={() => onSnooze(undefined)}
+              >
+                Завтра 09:00
+              </button>
+            </div>
+          )}
+        </>
       )}
 
       {confirmDelete && (
