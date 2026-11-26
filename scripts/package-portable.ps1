@@ -39,6 +39,27 @@ Get-ChildItem $releaseDir -Filter "*.dll" -ErrorAction SilentlyContinue | ForEac
   Copy-Item $_.FullName (Join-Path $staging $_.Name)
 }
 
+# Evergreen WebView2 bootstrapper — portable builds cannot use MSI's downloadBootstrapper.
+# App detects missing Runtime and can launch this installer (or the user runs it manually).
+$bootstrapperName = "MicrosoftEdgeWebview2Setup.exe"
+$bootstrapperDest = Join-Path $staging $bootstrapperName
+$bootstrapperUrl = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
+Write-Host "Downloading WebView2 Evergreen Bootstrapper..."
+try {
+  Invoke-WebRequest -Uri $bootstrapperUrl -OutFile $bootstrapperDest -UseBasicParsing
+  if (-not (Test-Path $bootstrapperDest) -or ((Get-Item $bootstrapperDest).Length -lt 1000)) {
+    throw "Bootstrapper download looked empty"
+  }
+  Write-Host "Bundled $bootstrapperName ($((Get-Item $bootstrapperDest).Length) bytes)"
+} catch {
+  Write-Warning "Could not download WebView2 bootstrapper: $_"
+  Write-Warning "Portable zip will ship without it; app still detects Runtime and shows a MessageBox with the download link."
+}
+
+# Seed empty data/ so the folder is obviously writable after unzip (log lands here on first run).
+New-Item -ItemType Directory -Force -Path (Join-Path $staging "data") | Out-Null
+Set-Content -Path (Join-Path $staging "data\.gitkeep") -Value "" -NoNewline
+
 $zipName = "QuickNotes-v$version-portable.zip"
 $zipPath = Join-Path $root $zipName
 if (Test-Path $zipPath) {
