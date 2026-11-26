@@ -31,7 +31,13 @@ pub fn run() {
                     .with_filter(|label| label == "main")
                     .build(),
             )
-            .plugin(tauri_plugin_autostart::Builder::new().build())
+            // Registers HKCU Run with the *current* exe path — works for portable
+            // folders and MSI installs alike (no installer required for autostart).
+            .plugin(
+                tauri_plugin_autostart::Builder::new()
+                    .app_name("QuickNotes")
+                    .build(),
+            )
             .plugin(
                 tauri_plugin_global_shortcut::Builder::new()
                     .with_handler(|app, _shortcut, event| {
@@ -61,6 +67,7 @@ pub fn run() {
             commands::set_last_project,
             commands::get_project_folder_path,
             commands::get_storage_dir,
+            commands::get_runtime_paths,
             commands::show_quick_window,
             commands::hide_quick_window,
             commands::show_main_window,

@@ -8,7 +8,7 @@ import {
 } from "@tauri-apps/plugin-autostart";
 import { invoke } from "@tauri-apps/api/core";
 import { useAppStore } from "../../store/useAppStore";
-import type { Settings, Theme } from "../../types";
+import type { RuntimePaths, Settings, Theme } from "../../types";
 import { PROJECT_COLORS } from "../../types";
 
 export function SettingsView() {
@@ -17,10 +17,17 @@ export function SettingsView() {
   const [recording, setRecording] = useState(false);
   const [hotkeyError, setHotkeyError] = useState<string | null>(null);
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
+  const [runtimePaths, setRuntimePaths] = useState<RuntimePaths | null>(null);
 
   useEffect(() => {
     if (config) setLocal({ ...config.settings });
   }, [config]);
+
+  useEffect(() => {
+    void invoke<RuntimePaths>("get_runtime_paths")
+      .then(setRuntimePaths)
+      .catch(() => setRuntimePaths(null));
+  }, []);
 
   if (!local) return null;
 
@@ -79,6 +86,35 @@ export function SettingsView() {
           checked={local.autostart}
           onChange={(autostart) => patch({ autostart })}
         />
+        <p className="-mt-3 px-1 text-xs text-ink-muted">
+          Пишет путь к текущему QuickNotes.exe в автозагрузку пользователя
+          (HKCU Run). MSI не нужен; после переноса папки включите снова.
+        </p>
+
+        {runtimePaths && (
+          <Field label={runtimePaths.portable ? "Портативный режим" : "Хранение данных"}>
+            <div className="space-y-1 text-xs text-ink-muted">
+              {runtimePaths.portable ? (
+                <p>
+                  Рядом с exe найден маркер PORTABLE. Конфиг и заметки по
+                  умолчанию пишутся в папку{" "}
+                  <code className="text-ink">{runtimePaths.configDir}</code>{" "}
+                  (без Program Files / без прав администратора).
+                </p>
+              ) : (
+                <p>
+                  Конфиг:{" "}
+                  <code className="text-ink">{runtimePaths.configPath}</code>
+                  . Заметки по умолчанию:{" "}
+                  <code className="text-ink">
+                    {runtimePaths.defaultStorageDir}
+                  </code>
+                  .
+                </p>
+              )}
+            </div>
+          </Field>
+        )}
 
         <Field label="Тема">
           <div className="flex gap-2">

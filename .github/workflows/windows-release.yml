@@ -1,4 +1,4 @@
-# Publish Windows installers to a GitHub Release via tauri-action.
+# Publish Windows installers + portable zip to a GitHub Release via tauri-action.
 # Triggers: version tags (v*) or manual workflow_dispatch.
 # Unsigned MVP builds — Windows SmartScreen may warn end users.
 name: Windows Release
@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag (e.g. v0.1.0). Leave empty to use package.json version.'
+        description: 'Release tag (e.g. v0.1.1). Leave empty to use package.json version.'
         required: false
         type: string
 
@@ -62,11 +62,30 @@ jobs:
           tagName: ${{ steps.tag.outputs.name }}
           releaseName: QuickNotes ${{ steps.tag.outputs.name }}
           releaseBody: |
-            Ready-to-run Windows installers for QuickNotes (no Node/Rust required).
+            Ready-to-run Windows builds for QuickNotes (no Node/Rust required).
 
-            **Artifacts:** `.msi` and NSIS `.exe` (unsigned MVP — Windows SmartScreen may show a warning; choose More info → Run anyway if prompted).
+            **Installers:** `.msi` and NSIS `.exe` (unsigned MVP — Windows SmartScreen may show a warning; choose More info → Run anyway if prompted).
+
+            **Portable (no install):** download `QuickNotes-*-portable.zip`, unzip anywhere, run `QuickNotes.exe`. See `PORTABLE.md` inside the zip. Autostart in Settings registers the portable exe path (no MSI).
 
             Built from commit `${{ github.sha }}`.
           releaseDraft: false
           prerelease: false
           args: --bundles msi,nsis
+
+      - name: Package portable zip
+        shell: pwsh
+        run: pwsh -File scripts/package-portable.ps1
+
+      - name: Upload portable zip to release
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.tag.outputs.name }}"
+          ZIP=$(ls QuickNotes-v*-portable.zip | head -n 1)
+          if [ -z "$ZIP" ]; then
+            echo "Portable zip not found" >&2
+            exit 1
+          fi
+          gh release upload "$TAG" "$ZIP" --clobber

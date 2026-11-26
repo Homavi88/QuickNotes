@@ -6,16 +6,17 @@
 
 ## Download for Windows
 
-Ready-to-run installers (no Node or Rust required):
+Ready-to-run builds (no Node or Rust required):
 
-- **[Latest release](https://github.com/Homavi88/QuickNotes/releases/latest)** — download the `.msi` or NSIS `.exe` from Assets
-- Direct latest links (update after each release if filenames change):
-  - [QuickNotes_0.1.0_x64_en-US.msi](https://github.com/Homavi88/QuickNotes/releases/latest/download/QuickNotes_0.1.0_x64_en-US.msi)
-  - [QuickNotes_0.1.0_x64-setup.exe](https://github.com/Homavi88/QuickNotes/releases/latest/download/QuickNotes_0.1.0_x64-setup.exe)
+- **[Latest release](https://github.com/Homavi88/QuickNotes/releases/latest)** — Assets include installers and a portable zip
+- **Portable (no installer / corporate PCs):** [QuickNotes-v0.1.1-portable.zip](https://github.com/Homavi88/QuickNotes/releases/latest/download/QuickNotes-v0.1.1-portable.zip) — unzip anywhere, run `QuickNotes.exe` (see [PORTABLE.md](./PORTABLE.md))
+- Installers:
+  - [QuickNotes_0.1.1_x64_en-US.msi](https://github.com/Homavi88/QuickNotes/releases/latest/download/QuickNotes_0.1.1_x64_en-US.msi)
+  - [QuickNotes_0.1.1_x64-setup.exe](https://github.com/Homavi88/QuickNotes/releases/latest/download/QuickNotes_0.1.1_x64-setup.exe)
 
 These are **unsigned** MVP builds. Windows SmartScreen may warn; choose **More info → Run anyway** if prompted. Code signing can be added later via CI secrets.
 
-CI also uploads the same installers as workflow artifacts on `main` / PRs (see the **Windows CI** workflow).
+CI uploads installers + the portable zip as workflow artifacts on `main` / PRs (see the **Windows CI** workflow). Releases attach the same portable zip via **Windows Release** (`v*` tags or `workflow_dispatch`).
 
 ---
 

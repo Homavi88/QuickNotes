@@ -4,6 +4,7 @@ import type {
   Draft,
   Note,
   Project,
+  RuntimePaths,
   Settings,
 } from "../types";
 
@@ -39,6 +40,7 @@ export const api = {
   getProjectFolderPath: (projectId: string) =>
     invoke<string>("get_project_folder_path", { projectId }),
   getStorageDir: () => invoke<string>("get_storage_dir"),
+  getRuntimePaths: () => invoke<RuntimePaths>("get_runtime_paths"),
   showQuickWindow: () => invoke<void>("show_quick_window"),
   hideQuickWindow: () => invoke<void>("hide_quick_window"),
   showMainWindow: (section?: string) =>

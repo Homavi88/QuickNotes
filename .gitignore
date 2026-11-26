@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# Portable packaging outputs (produced by scripts/package-portable.ps1 / CI)
+QuickNotes-portable/
+QuickNotes-v*-portable.zip
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

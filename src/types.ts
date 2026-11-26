@@ -11,6 +11,15 @@ export interface Settings {
   lastProjectId: string | null;
 }
 
+/** Where config/notes live (portable folder vs installed AppData). */
+export interface RuntimePaths {
+  portable: boolean;
+  exeDir: string;
+  configDir: string;
+  configPath: string;
+  defaultStorageDir: string;
+}
+
 export interface Project {
   id: string;
   name: string;
