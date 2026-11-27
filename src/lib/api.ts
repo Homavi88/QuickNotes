@@ -34,6 +34,7 @@ export const api = {
     text: string,
     reminder?: ReminderInput | null,
     reminderSnapshot?: import("../types").NoteReminder | null,
+    closed?: { closed?: boolean; closedAt?: string | null },
   ) =>
     invoke<Note>("save_note", {
       input: {
@@ -41,7 +42,13 @@ export const api = {
         text,
         reminder: reminder ?? null,
         reminderSnapshot: reminderSnapshot ?? null,
+        closed: closed?.closed ?? false,
+        closedAt: closed?.closedAt ?? null,
       },
+    }),
+  setNoteClosed: (projectId: string, noteId: string, closed: boolean) =>
+    invoke<Note>("set_note_closed", {
+      input: { projectId, noteId, closed },
     }),
   updateNote: (
     projectId: string,

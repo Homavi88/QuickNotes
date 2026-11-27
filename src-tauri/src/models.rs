@@ -174,6 +174,12 @@ pub struct Note {
     pub body: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reminder: Option<NoteReminder>,
+    /// When true, the note is marked closed/done (archived from the active list).
+    #[serde(default)]
+    pub closed: bool,
+    /// Local `YYYY-MM-DD HH:mm` when the note was closed (if known).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub closed_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -209,6 +215,11 @@ pub struct AppendNoteInput {
     /// Exact reminder snapshot (e.g. undo delete). Takes precedence over `reminder`.
     #[serde(default)]
     pub reminder_snapshot: Option<NoteReminder>,
+    /// Restore closed state (e.g. undo delete).
+    #[serde(default)]
+    pub closed: bool,
+    #[serde(default)]
+    pub closed_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -264,6 +275,14 @@ pub struct ReminderDueEvent {
 pub struct DeleteNoteInput {
     pub project_id: String,
     pub note_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetNoteClosedInput {
+    pub project_id: String,
+    pub note_id: String,
+    pub closed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

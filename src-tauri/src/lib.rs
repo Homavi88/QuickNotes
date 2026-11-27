@@ -80,6 +80,7 @@ pub fn run() {
             commands::save_note,
             commands::update_note,
             commands::delete_note,
+            commands::set_note_closed,
             commands::complete_reminder,
             commands::snooze_reminder,
             commands::save_draft,

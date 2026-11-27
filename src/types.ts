@@ -96,7 +96,13 @@ export interface Note {
   timestamp: string;
   body: string;
   reminder?: NoteReminder | null;
+  /** Closed / done — hidden from the default active list. */
+  closed?: boolean;
+  /** Local `YYYY-MM-DD HH:mm` when closed. */
+  closedAt?: string | null;
 }
+
+export type NotesFilter = "active" | "closed" | "all";
 
 export type MainSection = "notes" | "projects" | "settings";
 

@@ -1,7 +1,14 @@
 import { create } from "zustand";
 import { api } from "../lib/api";
 import { applyTheme } from "../lib/theme";
-import type { AppConfig, MainSection, Note, Project, Settings } from "../types";
+import type {
+  AppConfig,
+  MainSection,
+  Note,
+  NotesFilter,
+  Project,
+  Settings,
+} from "../types";
 
 interface AppState {
   ready: boolean;
@@ -10,6 +17,7 @@ interface AppState {
   selectedProjectId: string | null;
   searchQuery: string;
   searchAllProjects: boolean;
+  notesFilter: NotesFilter;
   section: MainSection;
   undo: { note: Note; timer: number } | null;
   load: () => Promise<void>;
@@ -18,6 +26,7 @@ interface AppState {
   setSelectedProjectId: (id: string | null) => void;
   setSearchQuery: (q: string) => void;
   setSearchAllProjects: (v: boolean) => void;
+  setNotesFilter: (filter: NotesFilter) => void;
   applyConfig: (config: AppConfig) => void;
   updateSettings: (settings: Settings) => Promise<void>;
   createProject: (name: string, color: string, emoji: string) => Promise<Project>;
@@ -39,6 +48,7 @@ interface AppState {
       setReminder?: boolean;
     },
   ) => Promise<void>;
+  setNoteClosed: (note: Note, closed: boolean) => Promise<void>;
   completeReminder: (note: Note) => Promise<void>;
   snoozeReminder: (
     note: Note,
@@ -53,6 +63,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   selectedProjectId: null,
   searchQuery: "",
   searchAllProjects: false,
+  notesFilter: "active",
   section: "notes",
   undo: null,
 
@@ -82,6 +93,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   setSearchQuery: (q) => set({ searchQuery: q }),
   setSearchAllProjects: (v) => set({ searchAllProjects: v }),
+  setNotesFilter: (notesFilter) => set({ notesFilter }),
 
   applyConfig: (config) => {
     applyTheme(config.settings.theme, config.settings.accentColor);
@@ -148,6 +160,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       undo.note.body,
       null,
       rem && rem.status !== "done" ? rem : null,
+      {
+        closed: !!undo.note.closed,
+        closedAt: undo.note.closedAt ?? null,
+      },
     );
     set({ undo: null });
     await get().refreshNotes();
@@ -155,6 +171,11 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   updateNote: async (note, text, opts) => {
     await api.updateNote(note.projectId, note.id, text, opts);
+    await get().refreshNotes();
+  },
+
+  setNoteClosed: async (note, closed) => {
+    await api.setNoteClosed(note.projectId, note.id, closed);
     await get().refreshNotes();
   },
 

@@ -1,6 +1,7 @@
 use crate::models::{Note, NoteReminder, ReminderInput, ReminderKind, ReminderStatus};
 use chrono::{Duration, Local, NaiveDateTime};
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -10,7 +11,24 @@ const ZWSP: char = '\u{200B}';
 
 /// Prefix for the reminder metadata HTML comment stored under each note header.
 const REMINDER_PREFIX: &str = "<!--qn-reminder:";
-const REMINDER_SUFFIX: &str = "-->";
+/// Prefix for the closed/done flag HTML comment stored under each note header.
+const CLOSED_PREFIX: &str = "<!--qn-closed:";
+const META_SUFFIX: &str = "-->";
+
+#[derive(Debug, Default)]
+struct NoteMeta {
+    reminder: Option<NoteReminder>,
+    closed: bool,
+    closed_at: Option<String>,
+}
+
+/// Payload stored inside `<!--qn-closed:…-->`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct ClosedMeta {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    at: Option<String>,
+}
 
 fn header_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
@@ -64,36 +82,73 @@ pub fn ensure_project_dir(storage_dir: &str, folder_name: &str) -> Result<PathBu
     Ok(notes)
 }
 
-/// Split optional reminder comment from the raw body block.
-fn extract_reminder(raw_body: &str) -> (Option<NoteReminder>, String) {
+/// Split leading `<!--qn-*-->` metadata comments from the raw body block.
+fn extract_meta(raw_body: &str) -> (NoteMeta, String) {
     let trimmed_start = raw_body.trim_start_matches('\n');
-    let mut lines = trimmed_start.lines();
-    let Some(first) = lines.next() else {
-        return (None, String::new());
-    };
-    let first_trim = first.trim();
-    if let Some(json) = first_trim
-        .strip_prefix(REMINDER_PREFIX)
-        .and_then(|s| s.strip_suffix(REMINDER_SUFFIX))
-    {
-        let reminder = serde_json::from_str::<NoteReminder>(json.trim()).ok();
-        let rest: String = lines.collect::<Vec<_>>().join("\n");
-        // Preserve a leading blank line after the comment as body start.
-        let body = if rest.starts_with('\n') {
-            rest
-        } else if rest.is_empty() {
-            String::new()
-        } else {
-            rest
-        };
-        return (reminder, body);
+    let mut meta = NoteMeta::default();
+    let mut lines = trimmed_start.lines().peekable();
+    let mut consumed_any = false;
+
+    while let Some(line) = lines.peek().copied() {
+        let trim = line.trim();
+        if let Some(json) = trim
+            .strip_prefix(REMINDER_PREFIX)
+            .and_then(|s| s.strip_suffix(META_SUFFIX))
+        {
+            if let Ok(reminder) = serde_json::from_str::<NoteReminder>(json.trim()) {
+                meta.reminder = Some(reminder);
+            }
+            lines.next();
+            consumed_any = true;
+            continue;
+        }
+        if let Some(payload) = trim
+            .strip_prefix(CLOSED_PREFIX)
+            .and_then(|s| s.strip_suffix(META_SUFFIX))
+        {
+            let payload = payload.trim();
+            if payload.eq_ignore_ascii_case("true") || payload == "1" {
+                meta.closed = true;
+            } else if let Ok(cm) = serde_json::from_str::<ClosedMeta>(payload) {
+                meta.closed = true;
+                meta.closed_at = cm.at;
+            } else if !payload.is_empty() && !payload.eq_ignore_ascii_case("false") {
+                // Unknown but present → treat as closed for forward-compat.
+                meta.closed = true;
+            }
+            lines.next();
+            consumed_any = true;
+            continue;
+        }
+        break;
     }
-    (None, trimmed_start.to_string())
+
+    if !consumed_any {
+        return (meta, trimmed_start.to_string());
+    }
+
+    let rest: String = lines.collect::<Vec<_>>().join("\n");
+    let body = if rest.starts_with('\n') {
+        rest
+    } else if rest.is_empty() {
+        String::new()
+    } else {
+        rest
+    };
+    (meta, body)
 }
 
 fn format_reminder_line(reminder: &NoteReminder) -> String {
     let json = serde_json::to_string(reminder).unwrap_or_else(|_| "{}".into());
-    format!("{REMINDER_PREFIX}{json}{REMINDER_SUFFIX}")
+    format!("{REMINDER_PREFIX}{json}{META_SUFFIX}")
+}
+
+fn format_closed_line(closed_at: Option<&str>) -> String {
+    let meta = ClosedMeta {
+        at: closed_at.map(|s| s.to_string()),
+    };
+    let json = serde_json::to_string(&meta).unwrap_or_else(|_| "{}".into());
+    format!("{CLOSED_PREFIX}{json}{META_SUFFIX}")
 }
 
 pub fn parse_notes(project_id: &str, content: &str) -> Vec<Note> {
@@ -115,7 +170,7 @@ pub fn parse_notes(project_id: &str, content: &str) -> Vec<Note> {
             } else {
                 trimmed
             };
-            let (reminder, body_without_meta) = extract_reminder(body_text);
+            let (meta, body_without_meta) = extract_meta(body_text);
             let body_text = unescape_body(&body_without_meta);
             let id = format!("{project_id}:{index}");
             notes.push(Note {
@@ -123,7 +178,9 @@ pub fn parse_notes(project_id: &str, content: &str) -> Vec<Note> {
                 project_id: project_id.to_string(),
                 timestamp: timestamp.clone(),
                 body: body_text,
-                reminder,
+                reminder: meta.reminder,
+                closed: meta.closed,
+                closed_at: meta.closed_at,
             });
             *index += 1;
             body.clear();
@@ -168,6 +225,10 @@ pub fn serialize_notes(notes: &[Note]) -> String {
         out.push_str(&format!("## {}\n", note.timestamp));
         if let Some(reminder) = &note.reminder {
             out.push_str(&format_reminder_line(reminder));
+            out.push('\n');
+        }
+        if note.closed {
+            out.push_str(&format_closed_line(note.closed_at.as_deref()));
             out.push('\n');
         }
         let escaped = escape_body(&note.body);
@@ -300,20 +361,41 @@ pub fn append_note(
     project_id: &str,
     text: &str,
     reminder: Option<NoteReminder>,
+    closed: bool,
+    closed_at: Option<String>,
 ) -> Result<Note, String> {
     let mut notes = read_project_notes(storage_dir, folder_name, project_id)?;
     let timestamp = Local::now().format("%Y-%m-%d %H:%M").to_string();
     let index = notes.len();
+    let closed_at = if closed {
+        Some(closed_at.unwrap_or_else(format_now_local))
+    } else {
+        None
+    };
     let note = Note {
         id: format!("{project_id}:{index}"),
         project_id: project_id.to_string(),
         timestamp,
         body: text.trim_end().to_string(),
         reminder,
+        closed,
+        closed_at,
     };
     notes.push(note.clone());
     write_project_notes(storage_dir, folder_name, &notes)?;
     Ok(note)
+}
+
+pub fn set_note_closed(note: &mut Note, closed: bool) {
+    if closed {
+        note.closed = true;
+        if note.closed_at.is_none() {
+            note.closed_at = Some(format_now_local());
+        }
+    } else {
+        note.closed = false;
+        note.closed_at = None;
+    }
 }
 
 pub fn sanitize_folder_name(name: &str) -> String {
@@ -381,13 +463,78 @@ mod tests {
             timestamp: "2026-11-26 14:30".into(),
             body: "call mom".into(),
             reminder: Some(reminder.clone()),
+            closed: false,
+            closed_at: None,
         }];
         let content = serialize_notes(&notes);
         assert!(content.contains("<!--qn-reminder:"));
+        assert!(!content.contains("<!--qn-closed:"));
         let parsed = parse_notes("p1", &content);
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].body, "call mom");
         assert_eq!(parsed[0].reminder.as_ref(), Some(&reminder));
+        assert!(!parsed[0].closed);
+    }
+
+    #[test]
+    fn roundtrips_closed_flag() {
+        let notes = vec![Note {
+            id: "p1:0".into(),
+            project_id: "p1".into(),
+            timestamp: "2026-11-26 14:30".into(),
+            body: "done task".into(),
+            reminder: None,
+            closed: true,
+            closed_at: Some("2026-11-27 09:15".into()),
+        }];
+        let content = serialize_notes(&notes);
+        assert!(content.contains("<!--qn-closed:"));
+        assert!(content.contains("2026-11-27 09:15"));
+        let parsed = parse_notes("p1", &content);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].body, "done task");
+        assert!(parsed[0].closed);
+        assert_eq!(parsed[0].closed_at.as_deref(), Some("2026-11-27 09:15"));
+    }
+
+    #[test]
+    fn roundtrips_reminder_and_closed_together() {
+        let reminder = NoteReminder {
+            kind: ReminderKind::Absolute,
+            due_at: "2026-11-28 10:00".into(),
+            relative_days: None,
+            status: ReminderStatus::Done,
+            snooze_until: None,
+            notified_at: Some("2026-11-28 10:01".into()),
+        };
+        let notes = vec![Note {
+            id: "p1:0".into(),
+            project_id: "p1".into(),
+            timestamp: "2026-11-26 14:30".into(),
+            body: "shipped".into(),
+            reminder: Some(reminder.clone()),
+            closed: true,
+            closed_at: Some("2026-11-28 11:00".into()),
+        }];
+        let content = serialize_notes(&notes);
+        assert!(content.contains("<!--qn-reminder:"));
+        assert!(content.contains("<!--qn-closed:"));
+        let parsed = parse_notes("p1", &content);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].body, "shipped");
+        assert_eq!(parsed[0].reminder.as_ref(), Some(&reminder));
+        assert!(parsed[0].closed);
+        assert_eq!(parsed[0].closed_at.as_deref(), Some("2026-11-28 11:00"));
+    }
+
+    #[test]
+    fn parses_legacy_closed_true_marker() {
+        let content = "## 2026-11-26 05:52\n<!--qn-closed:true-->\nplain note\n";
+        let notes = parse_notes("p1", content);
+        assert_eq!(notes.len(), 1);
+        assert!(notes[0].closed);
+        assert!(notes[0].closed_at.is_none());
+        assert_eq!(notes[0].body, "plain note");
     }
 
     #[test]
@@ -396,7 +543,29 @@ mod tests {
         let notes = parse_notes("p1", content);
         assert_eq!(notes.len(), 1);
         assert!(notes[0].reminder.is_none());
+        assert!(!notes[0].closed);
+        assert!(notes[0].closed_at.is_none());
         assert_eq!(notes[0].body, "plain note");
+    }
+
+    #[test]
+    fn reopen_clears_closed_on_serialize() {
+        let mut note = Note {
+            id: "p1:0".into(),
+            project_id: "p1".into(),
+            timestamp: "2026-11-26 14:30".into(),
+            body: "reopen me".into(),
+            reminder: None,
+            closed: true,
+            closed_at: Some("2026-11-27 09:15".into()),
+        };
+        set_note_closed(&mut note, false);
+        assert!(!note.closed);
+        assert!(note.closed_at.is_none());
+        let content = serialize_notes(std::slice::from_ref(&note));
+        assert!(!content.contains("<!--qn-closed:"));
+        let parsed = parse_notes("p1", &content);
+        assert!(!parsed[0].closed);
     }
 
     #[test]

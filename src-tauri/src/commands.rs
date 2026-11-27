@@ -2,8 +2,8 @@ use crate::config::{save_config, unique_folder_name};
 use crate::models::*;
 use crate::notes::{
     append_note, build_reminder_from_input, ensure_project_dir, project_notes_path,
-    read_project_notes, sanitize_folder_name, snooze_until_from_minutes,
-    snooze_until_tomorrow_morning, write_project_notes,
+    read_project_notes, sanitize_folder_name, set_note_closed as apply_note_closed,
+    snooze_until_from_minutes, snooze_until_tomorrow_morning, write_project_notes,
 };
 use crate::reminders::{apply_snooze, find_note_mut, mark_reminder_done, reminder_kind_allowed};
 use crate::state::AppState;
@@ -264,6 +264,8 @@ pub fn save_note(
         &project.id,
         text,
         reminder,
+        input.closed,
+        input.closed_at,
     )?;
     cfg.settings.last_project_id = Some(project.id.clone());
     cfg.draft = None;
@@ -382,6 +384,30 @@ pub fn snooze_reminder(
             note_id: input.note_id.clone(),
         },
     );
+    Ok(updated)
+}
+
+#[tauri::command]
+pub fn set_note_closed(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    input: SetNoteClosedInput,
+) -> Result<Note, String> {
+    let cfg = state.config.lock();
+    let project = find_project(&cfg, &input.project_id)?;
+    let mut notes =
+        read_project_notes(&cfg.settings.storage_dir, &project.folder_name, &project.id)?;
+    {
+        let note = find_note_mut(&mut notes, &input.note_id)?;
+        apply_note_closed(note, input.closed);
+    }
+    let updated = notes
+        .iter()
+        .find(|n| n.id == input.note_id)
+        .cloned()
+        .ok_or_else(|| "Note not found".to_string())?;
+    write_project_notes(&cfg.settings.storage_dir, &project.folder_name, &notes)?;
+    let _ = app.emit("notes-changed", project.id.clone());
     Ok(updated)
 }
 
