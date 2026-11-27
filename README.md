@@ -166,6 +166,7 @@ CI uploads installers + the portable zip as workflow artifacts on `main` / PRs (
 ```markdown
 ## 2026-11-26 05:52
 <!--qn-reminder:{"kind":"relative","dueAt":"2026-11-28 14:30","relativeDays":2,"status":"pending"}-->
+<!--qn-closed:{"at":"2026-11-27 10:00"}-->
 Текст заметки, может быть многострочным.
 ```
 
@@ -188,6 +189,10 @@ CI uploads installers + the portable zip as workflow artifacts on `main` / PRs (
 Комментарий не попадает в текст заметки в UI. Старые `notes.md` без строки читаются как раньше. Sidecar не используется — напоминание хранится в том же `notes.md`.
 
 Настройки: `remindersMode` (`off` | `relative` | `absolute` | `both`), `reminderNotifications` (bool). Фоновый опрос ~30 с; при due — OS toast (если включено) + баннер в главном окне (Готово / +15 мин / +1 час / завтра 09:00).
+
+#### Закрытые заметки (v0.1.8+)
+
+Опциональный маркер `<!--qn-closed:{"at":"YYYY-MM-DD HH:mm"}-->` (также принимается legacy `<!--qn-closed:true-->`). Наличие комментария = заметка закрыта; при открытии снова строка удаляется. Напоминание и closed могут стоять рядом под заголовком. В UI: фильтр **Активные / Закрытые / Все** (по умолчанию активные); кнопка «Закрыть» / «Открыть снова» на карточке.
 
 ### 6.2. Конфигурация
 

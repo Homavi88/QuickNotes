@@ -1,4 +1,12 @@
-import { Bell, Copy, ExternalLink, Pencil, Trash2 } from "lucide-react";
+import {
+  ArchiveRestore,
+  Bell,
+  CheckCircle2,
+  Copy,
+  ExternalLink,
+  Pencil,
+  Trash2,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 import { openPath } from "@tauri-apps/plugin-opener";
 import {
@@ -10,7 +18,13 @@ import {
 import { api } from "../../lib/api";
 import { groupNotesByDay, highlightText } from "../../lib/notesUi";
 import { useAppStore } from "../../store/useAppStore";
-import type { Note, Project, RemindersMode } from "../../types";
+import type { Note, NotesFilter, Project, RemindersMode } from "../../types";
+
+const FILTERS: { id: NotesFilter; label: string }[] = [
+  { id: "active", label: "Активные" },
+  { id: "closed", label: "Закрытые" },
+  { id: "all", label: "Все" },
+];
 
 export function NotesView() {
   const {
@@ -22,10 +36,13 @@ export function NotesView() {
     setSearchQuery,
     searchAllProjects,
     setSearchAllProjects,
+    notesFilter,
+    setNotesFilter,
     deleteNoteWithUndo,
     undo,
     undoDelete,
     updateNote,
+    setNoteClosed,
     completeReminder,
     snoozeReminder,
   } = useAppStore();
@@ -41,6 +58,7 @@ export function NotesView() {
   const noteCounts = useMemo(() => {
     const map = new Map<string, number>();
     for (const n of notes) {
+      if (n.closed) continue;
       map.set(n.projectId, (map.get(n.projectId) ?? 0) + 1);
     }
     return map;
@@ -51,13 +69,25 @@ export function NotesView() {
     if (!searchAllProjects && selectedProjectId) {
       list = list.filter((n) => n.projectId === selectedProjectId);
     }
+    if (notesFilter === "active") {
+      list = list.filter((n) => !n.closed);
+    } else if (notesFilter === "closed") {
+      list = list.filter((n) => !!n.closed);
+    }
     const q = searchQuery.trim().toLowerCase();
     if (q) list = list.filter((n) => n.body.toLowerCase().includes(q));
     return list;
-  }, [notes, searchQuery, searchAllProjects, selectedProjectId]);
+  }, [notes, searchQuery, searchAllProjects, selectedProjectId, notesFilter]);
 
   const groups = groupNotesByDay(filtered);
   const selected = projects.find((p) => p.id === selectedProjectId) ?? null;
+
+  const emptyMessage = (() => {
+    if (!selected && !searchAllProjects) return "Выберите проект";
+    if (notesFilter === "closed") return "Нет закрытых заметок";
+    if (notesFilter === "active") return "Пока нет активных заметок";
+    return "Пока нет заметок";
+  })();
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -84,13 +114,29 @@ export function NotesView() {
       </div>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex items-center gap-3 border-b border-line px-4 py-3">
+        <div className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-3">
           <input
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Поиск по тексту…"
             className="min-w-0 flex-1 rounded-xl border border-line bg-surface-muted px-3 py-2 text-sm outline-none focus:border-accent/50"
           />
+          <div className="flex rounded-xl border border-line p-0.5 text-xs">
+            {FILTERS.map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => setNotesFilter(f.id)}
+                className={`rounded-lg px-2.5 py-1.5 ${
+                  notesFilter === f.id
+                    ? "bg-accent/15 font-medium text-ink"
+                    : "text-ink-muted hover:text-ink"
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
           <label className="flex items-center gap-2 text-xs text-ink-muted">
             <input
               type="checkbox"
@@ -135,6 +181,9 @@ export function NotesView() {
                         reminder: reminderDraftToInput(remDraft),
                       })
                     }
+                    onToggleClosed={() =>
+                      void setNoteClosed(note, !note.closed)
+                    }
                     onComplete={() => void completeReminder(note)}
                     onSnooze={(minutes) =>
                       void snoozeReminder(note, { minutes })
@@ -146,7 +195,7 @@ export function NotesView() {
           ))}
           {!filtered.length && (
             <div className="py-16 text-center text-sm text-ink-muted">
-              {selected ? "Пока нет заметок" : "Выберите проект"}
+              {emptyMessage}
             </div>
           )}
 
@@ -207,6 +256,7 @@ function NoteCard({
   remindersMode,
   onDelete,
   onSave,
+  onToggleClosed,
   onComplete,
   onSnooze,
 }: {
@@ -216,6 +266,7 @@ function NoteCard({
   remindersMode: RemindersMode;
   onDelete: () => void;
   onSave: (text: string, reminder: ReminderDraft) => void;
+  onToggleClosed: () => void;
   onComplete: () => void;
   onSnooze: (minutes?: number) => void;
 }) {
@@ -236,8 +287,16 @@ function NoteCard({
           : `Напоминание · ${rem.dueAt}`
       : null;
 
+  const isClosed = !!note.closed;
+
   return (
-    <article className="rounded-2xl border border-line bg-surface-elevated p-4">
+    <article
+      className={`rounded-2xl border p-4 ${
+        isClosed
+          ? "border-line/60 bg-surface-elevated/60 opacity-75"
+          : "border-line bg-surface-elevated"
+      }`}
+    >
       <div className="mb-2 flex items-center gap-2 text-xs text-ink-faint">
         {project && (
           <>
@@ -252,6 +311,16 @@ function NoteCard({
           </>
         )}
         <span>{note.timestamp}</span>
+        {isClosed && (
+          <>
+            <span>·</span>
+            <span className="inline-flex items-center gap-1 text-emerald-500/90">
+              <CheckCircle2 className="h-3 w-3" />
+              Закрыта
+              {note.closedAt ? ` · ${note.closedAt}` : ""}
+            </span>
+          </>
+        )}
         {remActive && (
           <>
             <span>·</span>
@@ -262,6 +331,16 @@ function NoteCard({
           </>
         )}
         <div className="ml-auto flex items-center gap-1">
+          <IconBtn
+            title={isClosed ? "Открыть снова" : "Закрыть"}
+            onClick={onToggleClosed}
+          >
+            {isClosed ? (
+              <ArchiveRestore className="h-3.5 w-3.5" />
+            ) : (
+              <CheckCircle2 className="h-3.5 w-3.5" />
+            )}
+          </IconBtn>
           <IconBtn
             title="Копировать"
             onClick={() => void navigator.clipboard.writeText(note.body)}
@@ -324,7 +403,9 @@ function NoteCard({
       ) : (
         <>
           <div
-            className="whitespace-pre-wrap text-sm leading-relaxed text-ink"
+            className={`whitespace-pre-wrap text-sm leading-relaxed ${
+              isClosed ? "text-ink-muted" : "text-ink"
+            }`}
             dangerouslySetInnerHTML={{
               __html: highlightText(note.body, query),
             }}
