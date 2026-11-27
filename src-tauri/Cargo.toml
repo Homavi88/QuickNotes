@@ -1,6 +1,6 @@
 [package]
 name = "quicknotes"
-version = "0.1.7"
+version = "0.1.8"
 description = "QuickNotes — fast project notes for Windows"
 authors = ["QuickNotes"]
 edition = "2021"
